@@ -1,0 +1,42 @@
+version: '3.8'
+services:
+  kafka-init:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - kafka
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 10
+        for i in {1..10}; do
+          /usr/bin/kafka-broker-api-versions --bootstrap-server kafka:9092 && break
+          echo "Waiting for Kafka to be ready..."
+          sleep 5
+        done
+        for i in {1..10}; do
+          /usr/bin/kafka-topics --create --topic topic${i} --partitions 1 --replication-factor 1 --bootstrap-server kafka:9092
+        done
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    hostname: kafka
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_KRAFT_MODE: "true"                     # Enables KRaft mode
+      KAFKA_PROCESS_ROLES: controller,broker       # Single node acts as controller and broker
+      KAFKA_NODE_ID: 1                             # Node ID for this broker
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@localhost:9093" # Single controller voter for Kraft
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_LOG_DIRS: /var/lib/kafka/data          # Log data storage
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168               # Logs kept for 7 days
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      CLUSTER_ID: "Mk3OEYBSD34fcwNTJENDM2Qk"       # Unique cluster ID
