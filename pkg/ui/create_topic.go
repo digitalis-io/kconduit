@@ -12,13 +12,13 @@ import (
 )
 
 type CreateTopicModel struct {
-	client            *kafka.Client
-	inputs            []textinput.Model
-	focusIndex        int
-	err               error
-	successMsg        string
-	width             int
-	height            int
+	client     *kafka.Client
+	inputs     []textinput.Model
+	focusIndex int
+	err        error
+	successMsg string
+	width      int
+	height     int
 }
 
 const (
@@ -47,21 +47,24 @@ func NewCreateTopicModel(client *kafka.Client) CreateTopicModel {
 	var t textinput.Model
 	for i := range m.inputs {
 		t = textinput.New()
-		t.CursorStyle = cursorStyle
+		t.Cursor.Style = cursorStyle
 		t.CharLimit = 32
 
 		switch i {
 		case topicNameIdx:
-			t.Placeholder = "Topic name"
+			t.Prompt = "Topic Name: "
+			t.Placeholder = ""
 			t.Focus()
 			t.PromptStyle = focusedStyle
 			t.TextStyle = focusedStyle
 			t.CharLimit = 255
 		case partitionsIdx:
-			t.Placeholder = "Number of partitions (default: 1)"
+			t.Prompt = "Number of partitions (default: 1): "
+			t.Placeholder = "1"
 			t.CharLimit = 5
 		case replicationIdx:
-			t.Placeholder = "Replication factor (default: 1)"
+			t.Prompt = "Replication factor (default: 1): "
+			t.Placeholder = "1"
 			t.CharLimit = 3
 		}
 
