@@ -35,8 +35,14 @@ For creating topics, respond with JSON:
 For modifying topic partitions, respond with JSON:
 {"action": "modify_partitions", "topic": "topic-name", "partitions": 10}
 
+For modifying partitions on ALL topics, respond with JSON:
+{"action": "modify_all_partitions", "partitions": 100}
+
 For modifying topic configurations (like compression, retention, etc.), respond with JSON:
 {"action": "modify_config", "topic": "topic-name", "configs": {"compression.type": "snappy", "retention.ms": "86400000"}}
+
+For modifying configurations on ALL topics, respond with JSON:
+{"action": "modify_all_configs", "configs": {"compression.type": "gzip", "retention.ms": "604800000"}}
 
 For querying consumer groups (find groups with lag, list groups, etc.), respond with JSON:
 {"action": "query_consumer_groups", "filter": {"lag_greater_than": 10}}
@@ -54,7 +60,9 @@ or
 or
 {"action": "query_topics", "filter": {"replication_factor": 3}}
 
-Always respond with the appropriate JSON for the requested operation.
+Always respond with ONLY the appropriate JSON for the requested operation. Do NOT include explanations, markdown formatting, or multiple JSON blocks. Return a single, clean JSON object that can be directly executed.
+
+If it requires multiple steps, ensure they are in the right order and all necessary fields are included.
 
 Refuse to perform any actions that are not related to Kafka. Never delete anything.`
 
@@ -786,30 +794,176 @@ func (m *AIAssistantModel) queryOllama(query string) (string, error) {
 	return response, nil
 }
 
+func (m *AIAssistantModel) executeMultipleCommands(commands []map[string]interface{}) tea.Cmd {
+	log := logger.Get()
+	
+	return func() tea.Msg {
+		var responses []string
+		
+		for i, command := range commands {
+			action, ok := command["action"].(string)
+			if !ok {
+				continue
+			}
+			
+			log.WithField("action", action).WithField("step", i+1).Info("Executing command")
+			
+			// Execute each command synchronously
+			var result string
+			var err error
+			
+			switch action {
+			case "modify_partitions":
+				topic, _ := command["topic"].(string)
+				partitions, _ := command["partitions"].(float64)
+				
+				if topic != "" && partitions > 0 {
+					err = m.client.ModifyTopicPartitions(topic, int32(partitions))
+					if err != nil {
+						result = fmt.Sprintf("❌ Failed to modify partitions for %s: %v", topic, err)
+					} else {
+						result = fmt.Sprintf("✅ Successfully increased partitions for '%s' to %d", topic, int(partitions))
+					}
+				}
+				
+			case "modify_config":
+				topic, _ := command["topic"].(string)
+				configs, _ := command["configs"].(map[string]interface{})
+				
+				if topic != "" && configs != nil {
+					var configChanges []string
+					var configErrors []string
+					
+					for key, value := range configs {
+						if strValue, ok := value.(string); ok {
+							if err := m.client.UpdateTopicConfig(topic, key, strValue); err != nil {
+								configErrors = append(configErrors, fmt.Sprintf("%s: %v", key, err))
+							} else {
+								configChanges = append(configChanges, fmt.Sprintf("%s=%s", key, strValue))
+							}
+						}
+					}
+					
+					if len(configErrors) > 0 {
+						result = fmt.Sprintf("⚠️ Partially updated '%s'. Success: %s, Failed: %s", 
+							topic, strings.Join(configChanges, ", "), strings.Join(configErrors, ", "))
+					} else if len(configChanges) > 0 {
+						result = fmt.Sprintf("✅ Successfully updated '%s': %s", topic, strings.Join(configChanges, ", "))
+					}
+				}
+				
+			case "create_topic":
+				name, _ := command["name"].(string)
+				partitions, _ := command["partitions"].(float64)
+				replicationFactor, _ := command["replication_factor"].(float64)
+				
+				if name != "" {
+					err = m.client.CreateTopic(name, int32(partitions), int16(replicationFactor))
+					if err != nil {
+						result = fmt.Sprintf("❌ Failed to create topic %s: %v", name, err)
+					} else {
+						result = fmt.Sprintf("✅ Successfully created topic '%s'", name)
+						
+						// Apply configs if any
+						if configs, ok := command["configs"].(map[string]interface{}); ok {
+							for key, value := range configs {
+								if strValue, ok := value.(string); ok {
+									m.client.UpdateTopicConfig(name, key, strValue)
+								}
+							}
+						}
+					}
+				}
+			}
+			
+			if result != "" {
+				responses = append(responses, fmt.Sprintf("Step %d: %s", i+1, result))
+			}
+		}
+		
+		// Combine all responses
+		finalResponse := strings.Join(responses, "\n")
+		if finalResponse == "" {
+			finalResponse = "No actions were executed"
+		}
+		
+		return AIResponseMsg{
+			response: finalResponse,
+			err:      nil,
+		}
+	}
+}
+
 func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 	log := logger.Get()
 
-	// Try to find JSON in the response
-	start := strings.Index(response, "{")
-	end := strings.LastIndex(response, "}")
+	// Remove markdown code block markers if present
+	response = strings.ReplaceAll(response, "```json", "")
+	response = strings.ReplaceAll(response, "```", "")
 
-	if start == -1 || end == -1 || start > end {
-		// No JSON found, just show the response
+	// Find all JSON objects in the response
+	var commands []map[string]interface{}
+	remaining := response
+
+	for {
+		start := strings.Index(remaining, "{")
+		if start == -1 {
+			break
+		}
+
+		// Find the matching closing brace
+		end := -1
+		braceCount := 0
+		for i := start; i < len(remaining); i++ {
+			if remaining[i] == '{' {
+				braceCount++
+			} else if remaining[i] == '}' {
+				braceCount--
+				if braceCount == 0 {
+					end = i
+					break
+				}
+			}
+		}
+
+		if end == -1 {
+			break
+		}
+
+		jsonStr := remaining[start : end+1]
+		var command map[string]interface{}
+		if err := json.Unmarshal([]byte(jsonStr), &command); err == nil {
+			if _, ok := command["action"]; ok {
+				commands = append(commands, command)
+			}
+		}
+
+		remaining = remaining[end+1:]
+	}
+
+	// If no commands found, return nil
+	if len(commands) == 0 {
+		log.Debug("No valid JSON commands found in AI response")
 		return nil
 	}
 
-	jsonStr := response[start : end+1]
+	// Log the commands found
+	log.WithField("count", len(commands)).Info("Found JSON commands in AI response")
 
-	var command map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &command); err != nil {
-		log.WithError(err).Debug("Failed to parse JSON from AI response")
-		return nil
+	// If there are multiple commands, execute them all in sequence
+	if len(commands) > 1 {
+		return m.executeMultipleCommands(commands)
 	}
 
+	// Single command execution
+	command := commands[0]
 	action, ok := command["action"].(string)
 	if !ok {
+		log.Debug("No action field found in JSON command")
 		return nil
 	}
+
+	log.WithField("action", action).Info("Executing AI command")
 
 	switch action {
 	case "create_topic":
@@ -903,6 +1057,136 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 					response: fmt.Sprintf("✅ Successfully updated configuration for topic '%s':\n%s",
 						topic, strings.Join(configChanges, "\n")),
 					err: nil,
+				}
+			}
+		}
+
+	case "modify_all_partitions":
+		partitions, _ := command["partitions"].(float64)
+
+		if partitions > 0 {
+			return func() tea.Msg {
+				// Get all topics
+				topics, err := m.client.GetTopicDetails()
+				if err != nil {
+					return AIResponseMsg{
+						response: fmt.Sprintf("❌ Failed to fetch topics: %v", err),
+						err:      err,
+					}
+				}
+
+				var successes []string
+				var failures []string
+
+				for _, topic := range topics {
+					// Only increase partitions (Kafka doesn't allow decreasing)
+					if topic.Partitions < int(partitions) {
+						err := m.client.ModifyTopicPartitions(topic.Name, int32(partitions))
+						if err != nil {
+							failures = append(failures, fmt.Sprintf("%s: %v", topic.Name, err))
+							log.WithField("topic", topic.Name).WithError(err).Warn("Failed to modify partitions")
+						} else {
+							successes = append(successes, fmt.Sprintf("%s (%d→%d)", topic.Name, topic.Partitions, int(partitions)))
+						}
+					} else {
+						// Skip topics that already have enough partitions
+						log.WithField("topic", topic.Name).Debug("Topic already has sufficient partitions")
+					}
+				}
+
+				// Format response
+				var response strings.Builder
+				if len(successes) > 0 {
+					response.WriteString(fmt.Sprintf("✅ Successfully updated %d topic(s):\n", len(successes)))
+					for _, s := range successes {
+						response.WriteString(fmt.Sprintf("  • %s\n", s))
+					}
+				}
+
+				if len(failures) > 0 {
+					if len(successes) > 0 {
+						response.WriteString("\n")
+					}
+					response.WriteString(fmt.Sprintf("❌ Failed to update %d topic(s):\n", len(failures)))
+					for _, f := range failures {
+						response.WriteString(fmt.Sprintf("  • %s\n", f))
+					}
+				}
+
+				if len(successes) == 0 && len(failures) == 0 {
+					response.WriteString(fmt.Sprintf("ℹ️ All topics already have %d or more partitions", int(partitions)))
+				}
+
+				return AIResponseMsg{
+					response: response.String(),
+					err:      nil,
+				}
+			}
+		}
+
+	case "modify_all_configs":
+		configs, _ := command["configs"].(map[string]interface{})
+
+		if configs != nil {
+			return func() tea.Msg {
+				// Get all topics
+				topics, err := m.client.GetTopicDetails()
+				if err != nil {
+					return AIResponseMsg{
+						response: fmt.Sprintf("❌ Failed to fetch topics: %v", err),
+						err:      err,
+					}
+				}
+
+				var topicResults []string
+				var topicErrors []string
+
+				for _, topic := range topics {
+					var configChanges []string
+					var configErrors []string
+
+					for key, value := range configs {
+						if strValue, ok := value.(string); ok {
+							if err := m.client.UpdateTopicConfig(topic.Name, key, strValue); err != nil {
+								configErrors = append(configErrors, fmt.Sprintf("%s: %v", key, err))
+								log.WithField("topic", topic.Name).WithField("config", key).WithError(err).Warn("Failed to apply config")
+							} else {
+								configChanges = append(configChanges, fmt.Sprintf("%s=%s", key, strValue))
+							}
+						}
+					}
+
+					if len(configChanges) > 0 {
+						topicResults = append(topicResults, fmt.Sprintf("%s: %s", topic.Name, strings.Join(configChanges, ", ")))
+					}
+
+					if len(configErrors) > 0 {
+						topicErrors = append(topicErrors, fmt.Sprintf("%s: %s", topic.Name, strings.Join(configErrors, ", ")))
+					}
+				}
+
+				// Format response
+				var response strings.Builder
+				if len(topicResults) > 0 {
+					response.WriteString(fmt.Sprintf("✅ Successfully updated configuration for %d topic(s):\n", len(topicResults)))
+					for _, result := range topicResults {
+						response.WriteString(fmt.Sprintf("  • %s\n", result))
+					}
+				}
+
+				if len(topicErrors) > 0 {
+					if len(topicResults) > 0 {
+						response.WriteString("\n")
+					}
+					response.WriteString(fmt.Sprintf("❌ Failed to update configuration for %d topic(s):\n", len(topicErrors)))
+					for _, err := range topicErrors {
+						response.WriteString(fmt.Sprintf("  • %s\n", err))
+					}
+				}
+
+				return AIResponseMsg{
+					response: response.String(),
+					err:      nil,
 				}
 			}
 		}

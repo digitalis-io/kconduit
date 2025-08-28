@@ -26,6 +26,7 @@ const (
 	CreateTopicView
 	EditConfigView
 	AIAssistantView
+	DeleteTopicView
 )
 
 type TabView int
@@ -58,6 +59,7 @@ type Model struct {
 	createTopicModel CreateTopicModel
 	editConfigModel  *EditConfigModel
 	aiAssistantModel AIAssistantModel
+	deleteTopicModel DeleteTopicModel
 	selectedTopic    string
 	activeTab        TabView
 	focusedPanel     int // 0: topics list, 1: config table (when in Topics tab)
@@ -241,6 +243,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateEditConfigView(msg)
 	case AIAssistantView:
 		return m.updateAIAssistantView(msg)
+	case DeleteTopicView:
+		return m.updateDeleteTopicView(msg)
 	default:
 		return m.updateListView(msg)
 	}
@@ -387,6 +391,17 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.aiAssistantModel = NewAIAssistantModel(m.client, m.aiEngine, m.aiModel)
 			m.mode = AIAssistantView
 			return m, m.aiAssistantModel.Init()
+		case "D", "d":
+			// Delete topic - only available in Topics tab
+			if m.activeTab == TopicsTab && len(m.topics) > 0 && !m.loading && m.err == nil {
+				selectedRow := m.topicsTable.SelectedRow()
+				if len(selectedRow) > 0 {
+					m.selectedTopic = selectedRow[0]
+					m.deleteTopicModel = NewDeleteTopicModel(m.client, m.selectedTopic)
+					m.mode = DeleteTopicView
+					return m, m.deleteTopicModel.Init()
+				}
+			}
 		case "p", "P":
 			if m.activeTab == TopicsTab && len(m.topics) > 0 && !m.loading && m.err == nil {
 				selectedRow := m.topicsTable.SelectedRow()
@@ -692,6 +707,26 @@ func (m Model) updateAIAssistantView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateDeleteTopicView(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case SwitchToListViewMsg:
+		m.mode = ListView
+		m.loading = true
+		return m, fetchTopics(m.client)
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+	}
+
+	updatedModel, cmd := m.deleteTopicModel.Update(msg)
+	m.deleteTopicModel = updatedModel
+
+	return m, cmd
+}
+
 func (m Model) View() string {
 	switch m.mode {
 	case ProducerView:
@@ -704,6 +739,8 @@ func (m Model) View() string {
 		return m.editConfigModel.View()
 	case AIAssistantView:
 		return m.aiAssistantModel.View()
+	case DeleteTopicView:
+		return m.deleteTopicModel.View()
 	default:
 		return m.listView()
 	}
@@ -994,11 +1031,11 @@ func (m Model) getHelpText() string {
 	case TopicsTab:
 		if m.topicConfig != nil {
 			if m.focusedPanel == 1 {
-				return baseHelp + " | Tab: Switch panel | e: Edit Config | Enter: Consume | P: Produce"
+				return baseHelp + " | Tab: Switch panel | e: Edit Config | Enter: Consume | P: Produce | D: Delete Topic"
 			}
-			return baseHelp + " | Tab: Switch panel | Enter: Consume | P: Produce | C: Create Topic"
+			return baseHelp + " | Tab: Switch panel | Enter: Consume | P: Produce | C: Create Topic | D: Delete Topic"
 		}
-		return baseHelp + " | Enter: Consume | P: Produce | C: Create Topic"
+		return baseHelp + " | Enter: Consume | P: Produce | C: Create Topic | D: Delete Topic"
 	default:
 		return baseHelp
 	}

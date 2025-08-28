@@ -1,4 +1,14 @@
-# AI Assistant for KConduit
+# KConduit Features
+
+## Topic Deletion
+
+Topics can be deleted using the `D` key from the Topics tab. For safety:
+- A confirmation dialog will appear requiring you to type the exact topic name
+- The delete button is only enabled when the typed name matches exactly
+- This feature is NOT available through the AI Assistant to prevent accidental deletions
+- Press `ESC` to cancel the deletion at any time
+
+## AI Assistant for KConduit
 
 The AI Assistant feature allows you to interact with Kafka using natural language commands. Press `A` from any screen to open the AI Assistant.
 
@@ -83,6 +93,13 @@ The assistant will automatically select the first provider that has an API key c
 - "Change the compression to gzip on topic user-activity"
 - "Modify retention to 7 days on topic orders"
 
+### Batch Operations (ALL Topics)
+- "Increase partitions to 100 on all topics"
+- "Set compression to gzip on all topics"
+- "Change retention to 7 days for all topics"
+- "Update all topics to have 50 partitions"
+- "Enable compression on all topics"
+
 ### Topic Queries
 - "List topics with no compression"
 - "Find topics with more than 10 partitions"
@@ -128,6 +145,9 @@ The AI Assistant will automatically detect and parse commands for:
 - Configuring compression (gzip, snappy, lz4, zstd)
 - Modifying existing topic partitions (increase only)
 - Modifying topic configurations (retention, compression, etc.)
+- Batch operations on ALL topics:
+  - Modify partitions for all topics at once
+  - Update configurations for all topics at once
 - Querying topics by:
   - Compression type (none, gzip, snappy, lz4, zstd)
   - Partition count thresholds

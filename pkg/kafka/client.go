@@ -350,6 +350,26 @@ func (c *Client) CreateTopic(name string, numPartitions int32, replicationFactor
 	return nil
 }
 
+func (c *Client) DeleteTopic(name string) error {
+	log := logger.Get()
+	
+	if name == "" {
+		return fmt.Errorf("topic name cannot be empty")
+	}
+	
+	log.WithField("topic", name).Info("Deleting topic")
+	
+	// Delete the topic
+	err := c.admin.DeleteTopic(name)
+	if err != nil {
+		log.WithField("topic", name).WithError(err).Error("Failed to delete topic")
+		return fmt.Errorf("failed to delete topic: %w", err)
+	}
+	
+	log.WithField("topic", name).Info("Successfully deleted topic")
+	return nil
+}
+
 func (c *Client) ProduceMessage(topic, key, value string) error {
 	msg := &sarama.ProducerMessage{
 		Topic: topic,
