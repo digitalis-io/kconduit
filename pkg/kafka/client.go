@@ -493,6 +493,63 @@ func (c *Client) UpdateTopicConfig(topicName string, configKey string, configVal
 	return nil
 }
 
+func (c *Client) ModifyTopicPartitions(topicName string, numPartitions int32) error {
+	log := logger.Get()
+	
+	if topicName == "" {
+		err := fmt.Errorf("topic name cannot be empty")
+		log.WithError(err).Error("Invalid parameters for ModifyTopicPartitions")
+		return err
+	}
+
+	if numPartitions < 1 {
+		err := fmt.Errorf("number of partitions must be at least 1")
+		log.WithError(err).Error("Invalid partition count")
+		return err
+	}
+
+	log.WithFields(map[string]interface{}{
+		"topic":      topicName,
+		"partitions": numPartitions,
+	}).Debug("Modifying topic partitions")
+
+	// Get current topic metadata to check current partition count
+	metadata, err := c.admin.ListTopics()
+	if err != nil {
+		return fmt.Errorf("failed to list topics: %w", err)
+	}
+
+	topicMeta, exists := metadata[topicName]
+	if !exists {
+		return fmt.Errorf("topic %s not found", topicName)
+	}
+
+	currentPartitions := topicMeta.NumPartitions
+	if numPartitions <= currentPartitions {
+		return fmt.Errorf("new partition count (%d) must be greater than current count (%d)", 
+			numPartitions, currentPartitions)
+	}
+
+	// Create partition update
+	err = c.admin.CreatePartitions(topicName, numPartitions, nil, false)
+	if err != nil {
+		log.WithFields(map[string]interface{}{
+			"topic":      topicName,
+			"partitions": numPartitions,
+			"error":      err,
+		}).Error("Failed to modify topic partitions")
+		return fmt.Errorf("failed to modify partitions: %w", err)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"topic":         topicName,
+		"oldPartitions": currentPartitions,
+		"newPartitions": numPartitions,
+	}).Info("Successfully modified topic partitions")
+
+	return nil
+}
+
 func (c *Client) GetConsumerGroups() ([]ConsumerGroupInfo, error) {
 	log := logger.Get()
 	
@@ -570,13 +627,69 @@ func (c *Client) GetConsumerGroups() ([]ConsumerGroupInfo, error) {
 }
 
 func (c *Client) calculateConsumerLag(groupID string, topics []string) int64 {
-	// This is a simplified implementation
-	// A full implementation would need to:
-	// 1. Get committed offsets for the consumer group
-	// 2. Get high water marks for all partitions
-	// 3. Calculate the difference
-	// For now, we'll return 0 or implement if needed
-	return 0
+	log := logger.Get()
+	var totalLag int64
+	
+	// Get committed offsets for the consumer group
+	offsets, err := c.admin.ListConsumerGroupOffsets(groupID, nil)
+	if err != nil {
+		log.WithField("groupID", groupID).WithError(err).Debug("Failed to get consumer group offsets")
+		return 0
+	}
+	
+	// Create a consumer to get high water marks
+	consumer, err := sarama.NewConsumer(c.brokers, c.config)
+	if err != nil {
+		log.WithError(err).Debug("Failed to create consumer for lag calculation")
+		return 0
+	}
+	defer consumer.Close()
+	
+	// Calculate lag for each topic/partition
+	for topic, partitionOffsets := range offsets.Blocks {
+		// Get partitions for this topic
+		partitions, err := consumer.Partitions(topic)
+		if err != nil {
+			log.WithField("topic", topic).WithError(err).Debug("Failed to get partitions")
+			continue
+		}
+		
+		for partitionID, block := range partitionOffsets {
+			// Check if this partition exists
+			partitionFound := false
+			for _, p := range partitions {
+				if p == partitionID {
+					partitionFound = true
+					break
+				}
+			}
+			
+			if !partitionFound {
+				continue
+			}
+			
+			// Get the partition consumer to fetch high water mark
+			pc, err := consumer.ConsumePartition(topic, partitionID, sarama.OffsetNewest)
+			if err != nil {
+				log.WithField("topic", topic).WithField("partition", partitionID).WithError(err).Debug("Failed to get partition consumer")
+				continue
+			}
+			
+			// Get high water mark
+			highWaterMark := pc.HighWaterMarkOffset()
+			pc.Close()
+			
+			// Calculate lag for this partition
+			if highWaterMark > 0 && block.Offset >= 0 {
+				lag := highWaterMark - block.Offset
+				if lag > 0 {
+					totalLag += lag
+				}
+			}
+		}
+	}
+	
+	return totalLag
 }
 
 func (c *Client) Close() error {

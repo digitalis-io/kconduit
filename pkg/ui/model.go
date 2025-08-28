@@ -25,6 +25,7 @@ const (
 	ConsumerView
 	CreateTopicView
 	EditConfigView
+	AIAssistantView
 )
 
 type TabView int
@@ -56,12 +57,15 @@ type Model struct {
 	consumerModel    ConsumerModel
 	createTopicModel CreateTopicModel
 	editConfigModel  *EditConfigModel
+	aiAssistantModel AIAssistantModel
 	selectedTopic    string
 	activeTab        TabView
 	focusedPanel     int // 0: topics list, 1: config table (when in Topics tab)
+	aiEngine         string
+	aiModel          string
 }
 
-func NewModel(client *kafka.Client) Model {
+func NewModel(client *kafka.Client, aiEngine string, aiModel string) Model {
 	// Topics table
 	topicsColumns := []table.Column{
 		{Title: "Topic Name", Width: 30},
@@ -163,6 +167,8 @@ func NewModel(client *kafka.Client) Model {
 		loading:        true,
 		mode:           ListView,
 		activeTab:      BrokersTab,
+		aiEngine:       aiEngine,
+		aiModel:        aiModel,
 	}
 }
 
@@ -233,6 +239,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCreateTopicView(msg)
 	case EditConfigView:
 		return m.updateEditConfigView(msg)
+	case AIAssistantView:
+		return m.updateAIAssistantView(msg)
 	default:
 		return m.updateListView(msg)
 	}
@@ -374,6 +382,11 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.createTopicModel = NewCreateTopicModel(m.client)
 			m.mode = CreateTopicView
 			return m, m.createTopicModel.Init()
+		case "A", "a":
+			// Open AI Assistant
+			m.aiAssistantModel = NewAIAssistantModel(m.client, m.aiEngine, m.aiModel)
+			m.mode = AIAssistantView
+			return m, m.aiAssistantModel.Init()
 		case "p", "P":
 			if m.activeTab == TopicsTab && len(m.topics) > 0 && !m.loading && m.err == nil {
 				selectedRow := m.topicsTable.SelectedRow()
@@ -658,6 +671,27 @@ func (m Model) updateEditConfigView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateAIAssistantView(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case SwitchToListViewMsg:
+		m.mode = ListView
+		m.loading = true
+		return m, fetchTopics(m.client)
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+	}
+
+	updatedModel, cmd := m.aiAssistantModel.Update(msg)
+	if aiModel, ok := updatedModel.(AIAssistantModel); ok {
+		m.aiAssistantModel = aiModel
+	}
+	return m, cmd
+}
+
 func (m Model) View() string {
 	switch m.mode {
 	case ProducerView:
@@ -668,6 +702,8 @@ func (m Model) View() string {
 		return m.createTopicModel.View()
 	case EditConfigView:
 		return m.editConfigModel.View()
+	case AIAssistantView:
+		return m.aiAssistantModel.View()
 	default:
 		return m.listView()
 	}
@@ -952,7 +988,7 @@ func (m Model) renderACLsView() string {
 }
 
 func (m Model) getHelpText() string {
-	baseHelp := "→/←: Switch tabs | 1-4: Jump to tab | r: Refresh | q: Quit"
+	baseHelp := "→/←: Switch tabs | 1-4: Jump to tab | r: Refresh | A: AI Assistant | q: Quit"
 
 	switch m.activeTab {
 	case TopicsTab:
