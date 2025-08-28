@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +24,7 @@ const (
 	ProducerView
 	ConsumerView
 	CreateTopicView
+	EditConfigView
 )
 
 type TabView int
@@ -36,9 +39,12 @@ const (
 type Model struct {
 	topicsTable      table.Model
 	brokersTable     table.Model
+	configTable      table.Model
+	consumersTable   table.Model
 	client           *kafka.Client
 	topics           []kafka.TopicInfo
 	brokers          []kafka.BrokerInfo
+	consumerGroups   []kafka.ConsumerGroupInfo
 	topicConfig      *kafka.TopicConfig
 	err              error
 	loading          bool
@@ -49,8 +55,10 @@ type Model struct {
 	producerModel    ProducerModel
 	consumerModel    ConsumerModel
 	createTopicModel CreateTopicModel
+	editConfigModel  *EditConfigModel
 	selectedTopic    string
 	activeTab        TabView
+	focusedPanel     int // 0: topics list, 1: config table (when in Topics tab)
 }
 
 func NewModel(client *kafka.Client) Model {
@@ -74,7 +82,7 @@ func NewModel(client *kafka.Client) Model {
 		{Title: "Port", Width: 6},
 		{Title: "Status", Width: 8},
 		{Title: "Version", Width: 8},
-		{Title: "Role", Width: 12},
+		{Title: "Roles", Width: 20},
 		{Title: "Rack", Width: 10},
 		{Title: "Log Dirs", Width: 10},
 	}
@@ -96,17 +104,65 @@ func NewModel(client *kafka.Client) Model {
 		Foreground(lipgloss.Color("229")).
 		Background(lipgloss.Color("57")).
 		Bold(false)
-	
+
 	topicsTable.SetStyles(s)
 	brokersTable.SetStyles(s)
 
+	// Config table for topic configuration display
+	configColumns := []table.Column{
+		{Title: "Configuration", Width: 40},
+		{Title: "Value", Width: 45},
+	}
+
+	configTable := table.New(
+		table.WithColumns(configColumns),
+		table.WithFocused(false),
+		table.WithHeight(30), // Will be dynamically adjusted
+	)
+
+	// Custom styles for config table with colors
+	configStyles := table.DefaultStyles()
+	configStyles.Header = configStyles.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true).
+		Bold(true).
+		Foreground(lipgloss.Color("213")) // Purple for headers
+	configStyles.Cell = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("87")) // Cyan for keys
+	configStyles.Selected = configStyles.Selected.
+		Foreground(lipgloss.Color("229")).
+		Background(lipgloss.Color("57")).
+		Bold(false)
+
+	configTable.SetStyles(configStyles)
+
+	// Consumers table for consumer groups
+	consumersColumns := []table.Column{
+		{Title: "Group ID", Width: 25},
+		{Title: "Members", Width: 8},
+		{Title: "Topics", Width: 7},
+		{Title: "Lag", Width: 10},
+		{Title: "Coordinator", Width: 12},
+		{Title: "State", Width: 10},
+	}
+
+	consumersTable := table.New(
+		table.WithColumns(consumersColumns),
+		table.WithFocused(true),
+		table.WithHeight(10),
+	)
+	consumersTable.SetStyles(s)
+
 	return Model{
-		topicsTable:  topicsTable,
-		brokersTable: brokersTable,
-		client:       client,
-		loading:      true,
-		mode:         ListView,
-		activeTab:    BrokersTab,
+		topicsTable:    topicsTable,
+		brokersTable:   brokersTable,
+		configTable:    configTable,
+		consumersTable: consumersTable,
+		client:         client,
+		loading:        true,
+		mode:           ListView,
+		activeTab:      BrokersTab,
 	}
 }
 
@@ -120,6 +176,11 @@ type topicsMsg struct {
 type brokersMsg struct {
 	brokers []kafka.BrokerInfo
 	err     error
+}
+
+type consumerGroupsMsg struct {
+	groups []kafka.ConsumerGroupInfo
+	err    error
 }
 
 type topicConfigMsg struct {
@@ -138,6 +199,13 @@ func fetchBrokers(client *kafka.Client) tea.Cmd {
 	return func() tea.Msg {
 		brokers, err := client.GetBrokers()
 		return brokersMsg{brokers: brokers, err: err}
+	}
+}
+
+func fetchConsumerGroups(client *kafka.Client) tea.Cmd {
+	return func() tea.Msg {
+		groups, err := client.GetConsumerGroups()
+		return consumerGroupsMsg{groups: groups, err: err}
 	}
 }
 
@@ -163,6 +231,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateConsumerView(msg)
 	case CreateTopicView:
 		return m.updateCreateTopicView(msg)
+	case EditConfigView:
+		return m.updateEditConfigView(msg)
 	default:
 		return m.updateListView(msg)
 	}
@@ -175,46 +245,87 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		// Initial load after connection established
 		return m, tea.Batch(fetchTopics(m.client), fetchBrokers(m.client))
-	
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
-		case "tab", "right":
-			// Move to next tab
-			// First blur the current table
+		case "tab":
+			// In Topics tab, switch between topics list and config table
+			if m.activeTab == TopicsTab && m.topicConfig != nil {
+				if m.focusedPanel == 0 {
+					// Switch from topics list to config table
+					m.topicsTable.Blur()
+					m.configTable.Focus()
+					m.focusedPanel = 1
+				} else {
+					// Switch from config table to topics list
+					m.configTable.Blur()
+					m.topicsTable.Focus()
+					m.focusedPanel = 0
+				}
+				return m, nil
+			}
+			// Otherwise move to next tab
 			switch m.activeTab {
 			case BrokersTab:
 				m.brokersTable.Blur()
 				m.activeTab = TopicsTab
 				m.topicsTable.Focus()
+				m.focusedPanel = 0
 			case TopicsTab:
 				m.topicsTable.Blur()
+				m.configTable.Blur()
 				m.activeTab = ConsumerGroupsTab
+				m.consumersTable.Focus()
+				return m, fetchConsumerGroups(m.client)
 			case ConsumerGroupsTab:
+				m.consumersTable.Blur()
 				m.activeTab = ACLsTab
 			case ACLsTab:
 				m.activeTab = BrokersTab
 				m.brokersTable.Focus()
+				return m, fetchBrokers(m.client)
 			}
 			// Trigger refresh when switching tabs
 			return m, tea.Batch(fetchTopics(m.client), fetchBrokers(m.client))
-		case "shift+tab", "left":
-			// Move to previous tab
-			// First blur the current table
+		case "shift+tab":
+			// In Topics tab, switch between config table and topics list (reverse)
+			if m.activeTab == TopicsTab && m.topicConfig != nil {
+				if m.focusedPanel == 1 {
+					// Switch from config table to topics list
+					m.configTable.Blur()
+					m.topicsTable.Focus()
+					m.focusedPanel = 0
+				} else {
+					// Switch from topics list to config table
+					m.topicsTable.Blur()
+					m.configTable.Focus()
+					m.focusedPanel = 1
+				}
+				return m, nil
+			}
+			// Otherwise move to previous tab
 			switch m.activeTab {
 			case BrokersTab:
 				m.brokersTable.Blur()
 				m.activeTab = ACLsTab
 			case TopicsTab:
 				m.topicsTable.Blur()
+				m.configTable.Blur()
 				m.activeTab = BrokersTab
 				m.brokersTable.Focus()
+				m.focusedPanel = 0
 			case ConsumerGroupsTab:
+				m.consumersTable.Blur()
 				m.activeTab = TopicsTab
 				m.topicsTable.Focus()
+				m.focusedPanel = 0
+				return m, fetchTopics(m.client)
 			case ACLsTab:
 				m.activeTab = ConsumerGroupsTab
+				m.consumersTable.Focus()
+				return m, fetchConsumerGroups(m.client)
 			}
 			// Trigger refresh when switching tabs
 			return m, tea.Batch(fetchTopics(m.client), fetchBrokers(m.client))
@@ -233,6 +344,8 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.activeTab = TopicsTab
 			m.topicsTable.Focus()
+			m.configTable.Blur()
+			m.focusedPanel = 0
 			return m, fetchTopics(m.client)
 		case "3":
 			// Switch to Consumer Groups tab
@@ -240,9 +353,11 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.brokersTable.Blur()
 			} else if m.activeTab == TopicsTab {
 				m.topicsTable.Blur()
+				m.configTable.Blur()
 			}
 			m.activeTab = ConsumerGroupsTab
-			return m, nil // TODO: fetch consumer groups
+			m.consumersTable.Focus()
+			return m, fetchConsumerGroups(m.client)
 		case "4":
 			// Switch to ACLs tab
 			if m.activeTab == BrokersTab {
@@ -252,10 +367,10 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.activeTab = ACLsTab
 			return m, nil // TODO: fetch ACLs
-		case "r":
+		case "r", "R":
 			m.loading = true
 			return m, tea.Batch(fetchTopics(m.client), fetchBrokers(m.client))
-		case "c", "C":
+		case "C":
 			m.createTopicModel = NewCreateTopicModel(m.client)
 			m.mode = CreateTopicView
 			return m, m.createTopicModel.Init()
@@ -267,6 +382,23 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.producerModel = NewProducerModel(m.selectedTopic, m.client)
 					m.mode = ProducerView
 					return m, m.producerModel.Init()
+				}
+			}
+		case "e", "E":
+			// Edit config value
+			if m.activeTab == TopicsTab && m.focusedPanel == 1 && m.topicConfig != nil {
+				// Get the selected config row
+				selectedRow := m.configTable.SelectedRow()
+				if len(selectedRow) == 2 && selectedRow[0] != "" && selectedRow[0] != "No configuration available" {
+					// The key is now directly in the first column (no leading spaces)
+					configKey := selectedRow[0]
+
+					// Get the actual raw value from the config map
+					if rawValue, exists := m.topicConfig.Configs[configKey]; exists {
+						m.editConfigModel = NewEditConfigModel(m.client, m.selectedTopic, configKey, rawValue)
+						m.mode = EditConfigView
+						return m, m.editConfigModel.Init()
+					}
 				}
 			}
 		case "enter":
@@ -299,9 +431,13 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.topicsTable.SetRows(rows)
-		
+
 		// If we have topics and we're on the topics tab, select the first one
 		if len(m.topics) > 0 && m.activeTab == TopicsTab {
+			// Make sure topics table is focused
+			if !m.topicsTable.Focused() {
+				m.topicsTable.Focus()
+			}
 			selectedRow := m.topicsTable.SelectedRow()
 			if len(selectedRow) > 0 {
 				topicName := selectedRow[0]
@@ -309,11 +445,13 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, fetchTopicConfig(m.client, topicName)
 			}
 		}
-		
+
 	case topicConfigMsg:
 		m.loadingConfig = false
 		if msg.err == nil {
 			m.topicConfig = msg.config
+			// Update config table with the configuration
+			m.updateConfigTable()
 		}
 
 	case brokersMsg:
@@ -329,24 +467,24 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i, broker := range m.brokers {
 			role := "Broker"
 			if broker.IsController {
-				role = "★ Controller"
+				role = "✅ Controller"
 			}
-			
+
 			rack := broker.Rack
 			if rack == "" {
 				rack = "-"
 			}
-			
+
 			version := broker.ApiVersions
 			if version == "" {
 				version = "Unknown"
 			}
-			
+
 			logDirs := "-"
 			if broker.LogDirCount > 0 {
 				logDirs = fmt.Sprintf("%d", broker.LogDirCount)
 			}
-			
+
 			rows[i] = table.Row{
 				fmt.Sprintf("%d", broker.ID),
 				broker.Host,
@@ -360,44 +498,88 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.brokersTable.SetRows(rows)
 
+	case consumerGroupsMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.consumerGroups = msg.groups
+		m.err = nil
+
+		rows := make([]table.Row, len(m.consumerGroups))
+		for i, group := range m.consumerGroups {
+			lag := fmt.Sprintf("%d", group.ConsumerLag)
+			if group.ConsumerLag == 0 {
+				lag = "0"
+			}
+
+			rows[i] = table.Row{
+				group.GroupID,
+				fmt.Sprintf("%d", group.NumMembers),
+				fmt.Sprintf("%d", group.NumTopics),
+				lag,
+				group.Coordinator,
+				group.State,
+			}
+		}
+		m.consumersTable.SetRows(rows)
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		// Full width for single table view with tabs
 		tableHeight := msg.Height - 10 // Account for header and footer
-		
+
 		// Brokers get full width
 		m.brokersTable.SetHeight(tableHeight)
 		m.brokersTable.SetWidth(msg.Width - 4)
-		
+
 		// Topics table gets half width (for split view)
 		m.topicsTable.SetHeight(tableHeight)
 		m.topicsTable.SetWidth((msg.Width - 10) / 2)
+
+		// Consumers table gets full width
+		m.consumersTable.SetHeight(tableHeight)
+		m.consumersTable.SetWidth(msg.Width - 4)
 	}
 
 	// Update the active table based on current tab
-	// This allows keyboard navigation to work properly
+	// This needs to happen for all messages, not just after key handling
 	switch m.activeTab {
 	case BrokersTab:
 		var cmd tea.Cmd
 		m.brokersTable, cmd = m.brokersTable.Update(msg)
 		cmds = append(cmds, cmd)
 	case TopicsTab:
-		var cmd tea.Cmd
-		oldRow := m.topicsTable.SelectedRow()
-		m.topicsTable, cmd = m.topicsTable.Update(msg)
-		newRow := m.topicsTable.SelectedRow()
-		
-		// Check if selection changed
-		if len(oldRow) > 0 && len(newRow) > 0 && oldRow[0] != newRow[0] {
-			m.selectedTopic = newRow[0]
-			m.loadingConfig = true
-			cmds = append(cmds, cmd, fetchTopicConfig(m.client, newRow[0]))
+		// Always update the topics table to handle initial selection
+		if m.focusedPanel == 0 {
+			// Topics list is focused - it processes all events
+			var cmd tea.Cmd
+			oldRow := m.topicsTable.SelectedRow()
+			m.topicsTable, cmd = m.topicsTable.Update(msg)
+			newRow := m.topicsTable.SelectedRow()
+
+			// Check if selection changed
+			if len(oldRow) > 0 && len(newRow) > 0 && oldRow[0] != newRow[0] {
+				m.selectedTopic = newRow[0]
+				m.loadingConfig = true
+				cmds = append(cmds, cmd, fetchTopicConfig(m.client, newRow[0]))
+			} else {
+				cmds = append(cmds, cmd)
+			}
 		} else {
+			// Config table is focused - it processes all events
+			var cmd tea.Cmd
+			m.configTable, cmd = m.configTable.Update(msg)
 			cmds = append(cmds, cmd)
 		}
-	case ConsumerGroupsTab, ACLsTab:
-		// No table to update for these tabs yet
+	case ConsumerGroupsTab:
+		var cmd tea.Cmd
+		m.consumersTable, cmd = m.consumersTable.Update(msg)
+		cmds = append(cmds, cmd)
+	case ACLsTab:
+		// No table to update for ACLs tab yet
 	}
 
 	return m, tea.Batch(cmds...)
@@ -455,6 +637,27 @@ func (m Model) updateCreateTopicView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateEditConfigView(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case SwitchToListViewMsg:
+		m.mode = ListView
+		// Refresh the topic config to show any changes
+		return m, fetchTopicConfig(m.client, m.selectedTopic)
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+	}
+
+	updatedModel, cmd := m.editConfigModel.Update(msg)
+	if editModel, ok := updatedModel.(*EditConfigModel); ok {
+		m.editConfigModel = editModel
+	}
+	return m, cmd
+}
+
 func (m Model) View() string {
 	switch m.mode {
 	case ProducerView:
@@ -463,6 +666,8 @@ func (m Model) View() string {
 		return m.consumerModel.View()
 	case CreateTopicView:
 		return m.createTopicModel.View()
+	case EditConfigView:
+		return m.editConfigModel.View()
 	default:
 		return m.listView()
 	}
@@ -502,7 +707,7 @@ func (m Model) listView() string {
 
 	sb.WriteString(content)
 	sb.WriteString("\n\n")
-	
+
 	// Footer with context-sensitive help
 	help := m.getHelpText()
 	sb.WriteString(help)
@@ -512,17 +717,17 @@ func (m Model) listView() string {
 
 func (m Model) renderTabBar() string {
 	tabs := []string{"Brokers", "Topics", "Consumer Groups", "ACLs"}
-	
+
 	activeTabStyle := lipgloss.NewStyle().
 		Bold(true).
 		Background(lipgloss.Color("57")).
 		Foreground(lipgloss.Color("229")).
 		Padding(0, 2)
-	
+
 	inactiveTabStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("240")).
 		Padding(0, 2)
-	
+
 	var renderedTabs []string
 	for i, tab := range tabs {
 		prefix := fmt.Sprintf("[%d] ", i+1)
@@ -532,16 +737,16 @@ func (m Model) renderTabBar() string {
 			renderedTabs = append(renderedTabs, inactiveTabStyle.Render(prefix+tab))
 		}
 	}
-	
+
 	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
-	
+
 	// Add title
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("229"))
-	
+
 	title := titleStyle.Render("🚀 KConduit - Kafka Management")
-	
+
 	return lipgloss.JoinVertical(lipgloss.Left, title, tabBar)
 }
 
@@ -549,11 +754,11 @@ func (m Model) renderBrokersView() string {
 	if len(m.brokers) == 0 {
 		return "No brokers found."
 	}
-	
+
 	borderStyle := lipgloss.NewStyle().
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240"))
-	
+
 	return borderStyle.Render(m.brokersTable.View())
 }
 
@@ -561,24 +766,24 @@ func (m Model) renderTopicsView() string {
 	if len(m.topics) == 0 {
 		return "No topics found."
 	}
-	
+
 	borderStyle := lipgloss.NewStyle().
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240"))
-	
+
 	// Left panel: topics list
 	leftPanel := borderStyle.
-		Width((m.width-10)/2).
+		Width((m.width - 10) / 2).
 		Height(m.height - 12)
-	
+
 	topicsView := leftPanel.Render(m.topicsTable.View())
-	
+
 	// Right panel: topic config
 	rightPanel := borderStyle.
-		Width((m.width-10)/2).
+		Width((m.width - 10) / 2).
 		Height(m.height - 12).
 		Padding(1)
-	
+
 	var configView string
 	if m.loadingConfig {
 		configView = rightPanel.Render("Loading configuration...")
@@ -587,83 +792,159 @@ func (m Model) renderTopicsView() string {
 	} else {
 		configView = rightPanel.Render("Select a topic to view its configuration")
 	}
-	
+
 	// Join panels horizontally
 	return lipgloss.JoinHorizontal(lipgloss.Top, topicsView, " ", configView)
+}
+
+// updateConfigTable populates the config table with topic configuration
+func (m *Model) updateConfigTable() {
+	if m.topicConfig == nil || m.topicConfig.Configs == nil {
+		m.configTable.SetRows([]table.Row{})
+		return
+	}
+
+	var rows []table.Row
+
+	// Get sorted keys from all configs
+	keys := make([]string, 0, len(m.topicConfig.Configs))
+	for k := range m.topicConfig.Configs {
+		// Skip internal/system configs
+		if strings.HasPrefix(k, "confluent.") || strings.HasPrefix(k, "leader.") || strings.HasPrefix(k, "follower.") {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// Add all configs sorted alphabetically
+	for _, key := range keys {
+		val := m.topicConfig.Configs[key]
+		formattedVal := m.formatConfigValue(key, val)
+		rows = append(rows, table.Row{key, formattedVal})
+	}
+
+	// If no configs, show message
+	if len(rows) == 0 {
+		rows = append(rows, table.Row{"No configuration available", ""})
+	}
+
+	m.configTable.SetRows(rows)
+
+	// Use available height for better visibility
+	// Account for header (title + tabs), footer, borders, and config header
+	availableHeight := m.height - 18 // More conservative to ensure everything fits
+	if availableHeight < 10 {
+		availableHeight = 10
+	}
+	if availableHeight > 35 { // Cap max height to prevent overflow
+		availableHeight = 35
+	}
+	m.configTable.SetHeight(availableHeight)
+
+	// Ensure the table has a valid cursor position
+	if len(rows) > 0 && m.configTable.Cursor() >= len(rows) {
+		m.configTable.SetCursor(0)
+	}
 }
 
 func (m Model) renderTopicConfig() string {
 	if m.topicConfig == nil {
 		return "No configuration available"
 	}
-	
+
 	var sb strings.Builder
-	
+
 	// Title
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("229")).
-		Underline(true)
-	
-	sb.WriteString(titleStyle.Render(fmt.Sprintf("Topic: %s", m.topicConfig.Name)))
-	sb.WriteString("\n\n")
-	
-	// Basic info
-	infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	sb.WriteString(infoStyle.Render(fmt.Sprintf("Partitions: %d\n", m.topicConfig.Partitions)))
-	sb.WriteString(infoStyle.Render(fmt.Sprintf("Replication Factor: %d\n", m.topicConfig.ReplicationFactor)))
+		Foreground(lipgloss.Color("229"))
+
+	sb.WriteString(titleStyle.Render(fmt.Sprintf("📁 %s", m.topicConfig.Name)))
 	sb.WriteString("\n")
-	
-	// Partition Details
-	if len(m.topicConfig.PartitionDetails) > 0 {
-		sectionStyle := titleStyle.Underline(false)
-		sb.WriteString(sectionStyle.Render("Partition Details:"))
-		sb.WriteString("\n")
-		for _, p := range m.topicConfig.PartitionDetails {
-			sb.WriteString(fmt.Sprintf("  P%d: Leader=%d, Replicas=%v, ISR=%v\n", 
-				p.ID, p.Leader, p.Replicas, p.ISR))
-		}
-		sb.WriteString("\n")
-	}
-	
-	// Configuration
-	if len(m.topicConfig.Configs) > 0 {
-		sectionStyle := titleStyle.Underline(false)
-		sb.WriteString(sectionStyle.Render("Configuration:"))
-		sb.WriteString("\n")
-		
-		// Show important configs first
-		importantConfigs := []string{
-			"retention.ms", "retention.bytes", "segment.ms", "segment.bytes",
-			"cleanup.policy", "compression.type", "min.insync.replicas",
-		}
-		
-		for _, key := range importantConfigs {
-			if val, exists := m.topicConfig.Configs[key]; exists {
-				sb.WriteString(fmt.Sprintf("  %s: %s\n", key, val))
-			}
-		}
-		
-		// Show remaining configs
-		for key, val := range m.topicConfig.Configs {
-			isImportant := false
-			for _, imp := range importantConfigs {
-				if key == imp {
-					isImportant = true
-					break
-				}
-			}
-			if !isImportant && val != "" {
-				sb.WriteString(fmt.Sprintf("  %s: %s\n", key, val))
-			}
-		}
-	}
-	
+	sb.WriteString(strings.Repeat("─", 45))
+	sb.WriteString("\n\n")
+
+	// Basic info in a compact format
+	infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	sb.WriteString(infoStyle.Render(fmt.Sprintf("Partitions: %d | Replication: %d",
+		m.topicConfig.Partitions, m.topicConfig.ReplicationFactor)))
+	sb.WriteString("\n\n")
+
+	// Render the Bubble Tea table
+	sb.WriteString(m.configTable.View())
+
 	return sb.String()
 }
 
+// formatConfigValue formats config values to be human-readable
+func (m Model) formatConfigValue(key, value string) string {
+	// Convert milliseconds to human readable
+	if strings.HasSuffix(key, ".ms") {
+		if ms, err := strconv.ParseInt(value, 10, 64); err == nil {
+			if ms == -1 {
+				return "unlimited"
+			}
+			hours := ms / 3600000
+			if hours >= 24 {
+				days := hours / 24
+				return fmt.Sprintf("%dd", days)
+			}
+			if hours > 0 {
+				return fmt.Sprintf("%dh", hours)
+			}
+			minutes := ms / 60000
+			if minutes > 0 {
+				return fmt.Sprintf("%dm", minutes)
+			}
+			return fmt.Sprintf("%dms", ms)
+		}
+	}
+
+	// Convert bytes to human readable
+	if strings.HasSuffix(key, ".bytes") {
+		if bytes, err := strconv.ParseInt(value, 10, 64); err == nil {
+			if bytes == -1 {
+				return "unlimited"
+			}
+			if bytes >= 1073741824 {
+				return fmt.Sprintf("%.1fGB", float64(bytes)/1073741824)
+			}
+			if bytes >= 1048576 {
+				return fmt.Sprintf("%.1fMB", float64(bytes)/1048576)
+			}
+			if bytes >= 1024 {
+				return fmt.Sprintf("%.1fKB", float64(bytes)/1024)
+			}
+			return fmt.Sprintf("%dB", bytes)
+		}
+	}
+
+	// Truncate long values
+	if len(value) > 12 {
+		return value[:10] + ".."
+	}
+
+	return value
+}
+
 func (m Model) renderConsumerGroupsView() string {
-	return "Consumer Groups view - Coming soon..."
+	if m.loading {
+		return "\n  Loading consumer groups..."
+	}
+
+	if m.err != nil {
+		return fmt.Sprintf("\n  Error: %v", m.err)
+	}
+
+	if len(m.consumerGroups) == 0 {
+		return "\n  No consumer groups found"
+	}
+
+	return lipgloss.JoinVertical(
+		lipgloss.Top,
+		m.consumersTable.View(),
+	)
 }
 
 func (m Model) renderACLsView() string {
@@ -671,10 +952,16 @@ func (m Model) renderACLsView() string {
 }
 
 func (m Model) getHelpText() string {
-	baseHelp := "Tab/→: Next | Shift+Tab/←: Previous | 1-4: Jump to tab | r: Refresh | q: Quit"
-	
+	baseHelp := "→/←: Switch tabs | 1-4: Jump to tab | r: Refresh | q: Quit"
+
 	switch m.activeTab {
 	case TopicsTab:
+		if m.topicConfig != nil {
+			if m.focusedPanel == 1 {
+				return baseHelp + " | Tab: Switch panel | e: Edit Config | Enter: Consume | P: Produce"
+			}
+			return baseHelp + " | Tab: Switch panel | Enter: Consume | P: Produce | C: Create Topic"
+		}
 		return baseHelp + " | Enter: Consume | P: Produce | C: Create Topic"
 	default:
 		return baseHelp

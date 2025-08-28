@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
+	"github.com/axonops/kconduit/pkg/logger"
 )
 
 const topicCacheDuration = 1 * time.Minute
@@ -23,6 +24,9 @@ type Client struct {
 }
 
 func NewClient(brokers []string) (*Client, error) {
+	log := logger.Get()
+	log.WithField("brokers", brokers).Debug("Creating new Kafka client")
+	
 	config := sarama.NewConfig()
 	config.Version = sarama.V2_8_0_0
 	config.Producer.Return.Successes = true
@@ -35,15 +39,18 @@ func NewClient(brokers []string) (*Client, error) {
 
 	admin, err := sarama.NewClusterAdmin(brokers, config)
 	if err != nil {
+		log.WithError(err).WithField("brokers", brokers).Error("Failed to create cluster admin")
 		return nil, fmt.Errorf("failed to create cluster admin: %w", err)
 	}
 
 	producer, err := sarama.NewSyncProducer(brokers, config)
 	if err != nil {
 		admin.Close()
+		log.WithError(err).WithField("brokers", brokers).Error("Failed to create producer")
 		return nil, fmt.Errorf("failed to create producer: %w", err)
 	}
 
+	log.WithField("brokers", brokers).Info("Successfully connected to Kafka cluster")
 	return &Client{
 		brokers:  brokers,
 		config:   config,
@@ -124,7 +131,7 @@ func (c *Client) GetTopicConfig(topicName string) (*TopicConfig, error) {
 		Type: sarama.TopicResource,
 		Name: topicName,
 	}
-	
+
 	configs, err := c.admin.DescribeConfig(resource)
 	if err == nil && configs != nil {
 		for _, entry := range configs {
@@ -136,11 +143,11 @@ func (c *Client) GetTopicConfig(topicName string) (*TopicConfig, error) {
 	controller, err := c.admin.Controller()
 	if err == nil {
 		defer controller.Close()
-		
+
 		request := &sarama.MetadataRequest{
 			Topics: []string{topicName},
 		}
-		
+
 		metadata, err := controller.GetMetadata(request)
 		if err == nil && metadata != nil {
 			for _, topic := range metadata.Topics {
@@ -164,11 +171,18 @@ func (c *Client) GetTopicConfig(topicName string) (*TopicConfig, error) {
 }
 
 func (c *Client) GetBrokers() ([]BrokerInfo, error) {
+	log := logger.Get()
+	
+	// Get the controller broker
 	controller, err := c.admin.Controller()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get controller: %w", err)
 	}
 	defer controller.Close()
+	
+	// Store the controller's ID - this is the actual active controller
+	controllerBrokerID := controller.ID()
+	log.WithField("controllerBrokerID", controllerBrokerID).Info("Active controller broker ID")
 
 	// Create an empty metadata request to get all metadata
 	request := &sarama.MetadataRequest{}
@@ -176,6 +190,12 @@ func (c *Client) GetBrokers() ([]BrokerInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get metadata: %w", err)
 	}
+	
+	log.WithFields(map[string]interface{}{
+		"metadata.ControllerID": metadata.ControllerID,
+		"controller.ID()": controllerBrokerID,
+		"brokerCount": len(metadata.Brokers),
+	}).Info("Metadata retrieved from cluster")
 
 	var brokers []BrokerInfo
 	for _, broker := range metadata.Brokers {
@@ -188,7 +208,7 @@ func (c *Client) GetBrokers() ([]BrokerInfo, error) {
 				host = host[:idx]
 			}
 		}
-		
+
 		info := BrokerInfo{
 			ID:     broker.ID(),
 			Host:   host,
@@ -196,10 +216,17 @@ func (c *Client) GetBrokers() ([]BrokerInfo, error) {
 			Rack:   broker.Rack(),
 			Status: "Online", // Brokers in metadata are online
 		}
-		
+
 		// Check if this broker is the controller
-		if metadata.ControllerID == broker.ID() {
+		// In KRaft mode, use the controller.ID() we got directly
+		// In ZooKeeper mode, use metadata.ControllerID
+		if broker.ID() == controllerBrokerID || (metadata.ControllerID >= 0 && metadata.ControllerID == broker.ID()) {
 			info.IsController = true
+			log.WithFields(map[string]interface{}{
+				"brokerID": broker.ID(),
+				"controllerBrokerID": controllerBrokerID,
+				"metadata.ControllerID": metadata.ControllerID,
+			}).Info("Found active controller broker")
 		}
 
 		// Try to get API versions from the broker
@@ -215,7 +242,7 @@ func (c *Client) GetBrokers() ([]BrokerInfo, error) {
 				}
 			}
 		}
-		
+
 		// If we still don't have version, use a default
 		if info.ApiVersions == "" {
 			info.ApiVersions = "2.8+" // Based on our config version
@@ -243,20 +270,20 @@ func (c *Client) getKafkaVersion(apiKeys []sarama.ApiVersionsResponseKey) string
 	if len(apiKeys) == 0 {
 		return "Unknown"
 	}
-	
+
 	maxApiKey := int16(0)
 	apiVersionMap := make(map[int16]int16)
-	
+
 	for _, api := range apiKeys {
 		if api.ApiKey > maxApiKey {
 			maxApiKey = api.ApiKey
 		}
 		apiVersionMap[api.ApiKey] = api.MaxVersion
 	}
-	
+
 	// More accurate version detection based on specific API keys
 	// Check for API keys introduced in different Kafka versions
-	
+
 	// Kafka 3.0+ introduced API key 67 (DescribeCluster)
 	if _, hasKey67 := apiVersionMap[67]; hasKey67 {
 		if maxApiKey >= 68 {
@@ -264,36 +291,36 @@ func (c *Client) getKafkaVersion(apiKeys []sarama.ApiVersionsResponseKey) string
 		}
 		return "3.0+"
 	}
-	
+
 	// Kafka 2.8 introduced API key 60 (DescribeQuorum)
 	if _, hasKey60 := apiVersionMap[60]; hasKey60 {
 		return "2.8+"
 	}
-	
-	// Kafka 2.6 introduced API key 48 (DescribeClientQuotas)  
+
+	// Kafka 2.6 introduced API key 48 (DescribeClientQuotas)
 	if _, hasKey48 := apiVersionMap[48]; hasKey48 {
 		return "2.6+"
 	}
-	
+
 	// Kafka 2.4 introduced API key 43 (ElectLeaders)
 	if _, hasKey43 := apiVersionMap[43]; hasKey43 {
 		return "2.4+"
 	}
-	
+
 	// Kafka 2.0 introduced API key 36 (SaslAuthenticate)
 	if _, hasKey36 := apiVersionMap[36]; hasKey36 {
 		return "2.0+"
 	}
-	
+
 	// Check by max API key for older versions
 	if maxApiKey >= 35 {
 		return "2.0+"
 	}
-	
+
 	if maxApiKey >= 20 {
 		return "1.0+"
 	}
-	
+
 	return "0.11+"
 }
 
@@ -425,6 +452,133 @@ func (c *Client) ConsumeMessages(ctx context.Context, topic string, messageChan 
 	return nil
 }
 
+func (c *Client) UpdateTopicConfig(topicName string, configKey string, configValue string) error {
+	log := logger.Get()
+	
+	if topicName == "" || configKey == "" {
+		err := fmt.Errorf("topic name and config key cannot be empty")
+		log.WithError(err).Error("Invalid parameters for UpdateTopicConfig")
+		return err
+	}
+
+	log.WithFields(map[string]interface{}{
+		"topic": topicName,
+		"key":   configKey,
+		"value": configValue,
+	}).Debug("Updating topic configuration")
+
+	// Create the configuration entries map
+	configEntries := map[string]*string{
+		configKey: &configValue,
+	}
+
+	// Apply the configuration change
+	err := c.admin.AlterConfig(sarama.TopicResource, topicName, configEntries, false)
+	if err != nil {
+		log.WithFields(map[string]interface{}{
+			"topic": topicName,
+			"key":   configKey,
+			"value": configValue,
+			"error": err,
+		}).Error("Failed to update topic configuration")
+		return fmt.Errorf("failed to update topic config: %w", err)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"topic": topicName,
+		"key":   configKey,
+		"value": configValue,
+	}).Info("Successfully updated topic configuration")
+
+	return nil
+}
+
+func (c *Client) GetConsumerGroups() ([]ConsumerGroupInfo, error) {
+	log := logger.Get()
+	
+	// List all consumer groups
+	groups, err := c.admin.ListConsumerGroups()
+	if err != nil {
+		log.WithError(err).Error("Failed to list consumer groups")
+		return nil, fmt.Errorf("failed to list consumer groups: %w", err)
+	}
+	
+	var groupInfos []ConsumerGroupInfo
+	
+	for groupID := range groups {
+		// Get group description for detailed info
+		descriptions, err := c.admin.DescribeConsumerGroups([]string{groupID})
+		if err != nil {
+			log.WithField("groupID", groupID).WithError(err).Warn("Failed to describe consumer group")
+			continue
+		}
+		
+		if len(descriptions) == 0 {
+			continue
+		}
+		
+		desc := descriptions[0]
+		
+		// Build consumer group info
+		info := ConsumerGroupInfo{
+			GroupID:    groupID,
+			State:      desc.State,
+			NumMembers: len(desc.Members),
+		}
+		
+		// Get coordinator info - coordinator is typically embedded in the description
+		info.Coordinator = "unknown"
+		
+		// Collect unique topics from member metadata
+		topicSet := make(map[string]struct{})
+		for _, member := range desc.Members {
+			// Parse member metadata to get topics
+			// Note: MemberMetadata contains the subscription info
+			if len(member.MemberMetadata) > 0 {
+				// In production, you'd parse the metadata properly
+				// For now we'll use a placeholder
+			}
+		}
+		
+		// For now, get topics another way - through ListConsumerGroupOffsets
+		offsets, err := c.admin.ListConsumerGroupOffsets(groupID, nil)
+		if err == nil && offsets != nil {
+			for topic := range offsets.Blocks {
+				topicSet[topic] = struct{}{}
+				info.Topics = append(info.Topics, topic)
+			}
+		}
+		info.NumTopics = len(topicSet)
+		
+		// Calculate consumer lag (simplified - would need offset fetch for accurate lag)
+		info.ConsumerLag = c.calculateConsumerLag(groupID, info.Topics)
+		
+		// Collect member IDs
+		for _, member := range desc.Members {
+			info.Members = append(info.Members, member.MemberId)
+		}
+		
+		groupInfos = append(groupInfos, info)
+	}
+	
+	// Sort by group ID
+	sort.Slice(groupInfos, func(i, j int) bool {
+		return groupInfos[i].GroupID < groupInfos[j].GroupID
+	})
+	
+	return groupInfos, nil
+}
+
+func (c *Client) calculateConsumerLag(groupID string, topics []string) int64 {
+	// This is a simplified implementation
+	// A full implementation would need to:
+	// 1. Get committed offsets for the consumer group
+	// 2. Get high water marks for all partitions
+	// 3. Calculate the difference
+	// For now, we'll return 0 or implement if needed
+	return 0
+}
+
 func (c *Client) Close() error {
 	var errs []error
 
@@ -487,4 +641,15 @@ type Message struct {
 	Value     string
 	Timestamp time.Time
 	Headers   map[string]string
+}
+
+type ConsumerGroupInfo struct {
+	GroupID       string
+	NumMembers    int
+	NumTopics     int
+	ConsumerLag   int64
+	Coordinator   string
+	State         string
+	Topics        []string
+	Members       []string
 }
