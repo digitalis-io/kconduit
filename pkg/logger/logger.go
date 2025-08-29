@@ -19,7 +19,7 @@ func Init(level, logFile string) error {
 	var err error
 	once.Do(func() {
 		Log = logrus.New()
-		
+
 		// Set log level
 		var logLevel logrus.Level
 		logLevel, err = logrus.ParseLevel(level)
@@ -27,7 +27,7 @@ func Init(level, logFile string) error {
 			return
 		}
 		Log.SetLevel(logLevel)
-		
+
 		// Set output
 		if logFile != "" {
 			var f *os.File
@@ -53,7 +53,7 @@ func Init(level, logFile string) error {
 				Log.SetOutput(io.Discard)
 			}
 		}
-		
+
 		// Set formatter
 		Log.SetFormatter(&logrus.TextFormatter{
 			FullTimestamp:   true,
