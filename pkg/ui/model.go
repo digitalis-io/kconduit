@@ -27,6 +27,9 @@ const (
 	EditConfigView
 	AIAssistantView
 	DeleteTopicView
+	CreateACLView
+	EditACLView
+	DeleteACLView
 )
 
 type TabView int
@@ -43,10 +46,12 @@ type Model struct {
 	brokersTable     table.Model
 	configTable      table.Model
 	consumersTable   table.Model
+	aclTable         *table.Model
 	client           *kafka.Client
 	topics           []kafka.TopicInfo
 	brokers          []kafka.BrokerInfo
 	consumerGroups   []kafka.ConsumerGroupInfo
+	acls             []kafka.ACL
 	topicConfig      *kafka.TopicConfig
 	err              error
 	loading          bool
@@ -57,6 +62,9 @@ type Model struct {
 	producerModel    ProducerModel
 	consumerModel    ConsumerModel
 	createTopicModel CreateTopicModel
+	createACLModel   CreateACLHuhModel
+	editACLModel     EditACLHuhModel
+	deleteACLModel   DeleteACLModel
 	editConfigModel  *EditConfigModel
 	aiAssistantModel AIAssistantModel
 	deleteTopicModel DeleteTopicModel
@@ -196,6 +204,15 @@ type topicConfigMsg struct {
 	err    error
 }
 
+type aclsMsg struct {
+	acls []kafka.ACL
+	err  error
+}
+
+type ViewChangedMsg struct {
+	View TabView
+}
+
 func fetchTopics(client *kafka.Client) tea.Cmd {
 	return func() tea.Msg {
 		topics, err := client.GetTopicDetails()
@@ -214,6 +231,13 @@ func fetchConsumerGroups(client *kafka.Client) tea.Cmd {
 	return func() tea.Msg {
 		groups, err := client.GetConsumerGroups()
 		return consumerGroupsMsg{groups: groups, err: err}
+	}
+}
+
+func fetchACLs(client *kafka.Client) tea.Cmd {
+	return func() tea.Msg {
+		acls, err := client.ListACLs()
+		return aclsMsg{acls: acls, err: err}
 	}
 }
 
@@ -245,6 +269,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateAIAssistantView(msg)
 	case DeleteTopicView:
 		return m.updateDeleteTopicView(msg)
+	case CreateACLView:
+		return m.updateCreateACLView(msg)
+	case EditACLView:
+		return m.updateEditACLView(msg)
+	case DeleteACLView:
+		return m.updateDeleteACLView(msg)
 	default:
 		return m.updateListView(msg)
 	}
@@ -294,6 +324,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case ConsumerGroupsTab:
 				m.consumersTable.Blur()
 				m.activeTab = ACLsTab
+				return m, fetchACLs(m.client)
 			case ACLsTab:
 				m.activeTab = BrokersTab
 				m.brokersTable.Focus()
@@ -378,21 +409,36 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.topicsTable.Blur()
 			}
 			m.activeTab = ACLsTab
-			return m, nil // TODO: fetch ACLs
+			return m, fetchACLs(m.client)
 		case "r", "R":
 			m.loading = true
-			return m, tea.Batch(fetchTopics(m.client), fetchBrokers(m.client))
+			switch m.activeTab {
+			case ACLsTab:
+				return m, fetchACLs(m.client)
+			case ConsumerGroupsTab:
+				return m, fetchConsumerGroups(m.client)
+			default:
+				return m, tea.Batch(fetchTopics(m.client), fetchBrokers(m.client))
+			}
 		case "C":
-			m.createTopicModel = NewCreateTopicModel(m.client)
-			m.mode = CreateTopicView
-			return m, m.createTopicModel.Init()
+			if m.activeTab == ACLsTab {
+				// Create ACL
+				m.createACLModel = NewCreateACLHuhModel(m.client)
+				m.mode = CreateACLView
+				return m, m.createACLModel.Init()
+			} else {
+				// Create Topic
+				m.createTopicModel = NewCreateTopicModel(m.client)
+				m.mode = CreateTopicView
+				return m, m.createTopicModel.Init()
+			}
 		case "A", "a":
 			// Open AI Assistant
 			m.aiAssistantModel = NewAIAssistantModel(m.client, m.aiEngine, m.aiModel)
 			m.mode = AIAssistantView
 			return m, m.aiAssistantModel.Init()
 		case "D", "d":
-			// Delete topic - only available in Topics tab
+			// Delete topic or ACL depending on active tab
 			if m.activeTab == TopicsTab && len(m.topics) > 0 && !m.loading && m.err == nil {
 				selectedRow := m.topicsTable.SelectedRow()
 				if len(selectedRow) > 0 {
@@ -400,6 +446,24 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.deleteTopicModel = NewDeleteTopicModel(m.client, m.selectedTopic)
 					m.mode = DeleteTopicView
 					return m, m.deleteTopicModel.Init()
+				}
+			} else if m.activeTab == ACLsTab && len(m.acls) > 0 && !m.loading && m.err == nil {
+				// Delete ACL
+				selectedRow := m.aclTable.SelectedRow()
+				if len(selectedRow) >= 7 {
+					// Create ACL from selected row data - matching table column order
+					selectedACL := kafka.ACL{
+						Principal:      selectedRow[0], // Principal
+						ResourceType:   selectedRow[1], // Resource Type
+						ResourceName:   selectedRow[2], // Resource
+						PatternType:    selectedRow[3], // Pattern
+						Operation:      selectedRow[4], // Operation
+						PermissionType: selectedRow[5], // Permission
+						Host:           selectedRow[6], // Host
+					}
+					m.deleteACLModel = NewDeleteACLModel(m.client, selectedACL)
+					m.mode = DeleteACLView
+					return m, m.deleteACLModel.Init()
 				}
 			}
 		case "p", "P":
@@ -413,7 +477,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "e", "E":
-			// Edit config value
+			// Edit config value or ACL
 			if m.activeTab == TopicsTab && m.focusedPanel == 1 && m.topicConfig != nil {
 				// Get the selected config row
 				selectedRow := m.configTable.SelectedRow()
@@ -427,6 +491,24 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.mode = EditConfigView
 						return m, m.editConfigModel.Init()
 					}
+				}
+			} else if m.activeTab == ACLsTab && m.aclTable != nil && len(m.acls) > 0 {
+				// Edit ACL
+				selectedRow := m.aclTable.SelectedRow()
+				if len(selectedRow) >= 7 {
+					// Reconstruct the ACL from the selected row
+					selectedACL := kafka.ACL{
+						Principal:      selectedRow[0],
+						ResourceType:   selectedRow[1],
+						ResourceName:   selectedRow[2],
+						PatternType:    selectedRow[3],
+						Operation:      selectedRow[4],
+						PermissionType: selectedRow[5],
+						Host:           selectedRow[6],
+					}
+					m.editACLModel = NewEditACLHuhModel(m.client, selectedACL)
+					m.mode = EditACLView
+					return m, m.editACLModel.Init()
 				}
 			}
 		case "enter":
@@ -552,6 +634,60 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.consumersTable.SetRows(rows)
+		
+	case aclsMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.acls = msg.acls
+		m.err = nil
+		
+		// Create ACL table if not already created
+		if m.aclTable == nil {
+			aclColumns := []table.Column{
+				{Title: "Principal", Width: 20},
+				{Title: "Resource Type", Width: 15},
+				{Title: "Resource", Width: 25},
+				{Title: "Pattern", Width: 10},
+				{Title: "Operation", Width: 15},
+				{Title: "Permission", Width: 10},
+				{Title: "Host", Width: 15},
+			}
+			t := table.New(
+				table.WithColumns(aclColumns),
+				table.WithFocused(true),
+				table.WithHeight(10),
+			)
+			
+			s := table.DefaultStyles()
+			s.Header = s.Header.
+				BorderStyle(lipgloss.NormalBorder()).
+				BorderForeground(lipgloss.Color("240")).
+				BorderBottom(true).
+				Bold(false)
+			s.Selected = s.Selected.
+				Foreground(lipgloss.Color("229")).
+				Background(lipgloss.Color("57")).
+				Bold(false)
+			t.SetStyles(s)
+			m.aclTable = &t
+		}
+		
+		rows := make([]table.Row, len(m.acls))
+		for i, acl := range m.acls {
+			rows[i] = table.Row{
+				acl.Principal,
+				acl.ResourceType,
+				acl.ResourceName,
+				acl.PatternType,
+				acl.Operation,
+				acl.PermissionType,
+				acl.Host,
+			}
+		}
+		m.aclTable.SetRows(rows)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -607,7 +743,11 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.consumersTable, cmd = m.consumersTable.Update(msg)
 		cmds = append(cmds, cmd)
 	case ACLsTab:
-		// No table to update for ACLs tab yet
+		if m.aclTable != nil {
+			var cmd tea.Cmd
+			*m.aclTable, cmd = m.aclTable.Update(msg)
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -662,6 +802,63 @@ func (m Model) updateCreateTopicView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	m.createTopicModel, cmd = m.createTopicModel.Update(msg)
+	return m, cmd
+}
+
+func (m Model) updateCreateACLView(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch msg := msg.(type) {
+	case ViewChangedMsg:
+		if msg.View == ACLsTab {
+			m.mode = ListView
+			m.activeTab = ACLsTab
+			m.loading = true
+			return m, fetchACLs(m.client)
+		}
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+	}
+	updatedModel, cmd := m.createACLModel.Update(msg)
+	m.createACLModel = updatedModel.(CreateACLHuhModel)
+	return m, cmd
+}
+
+func (m Model) updateEditACLView(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch msg := msg.(type) {
+	case ViewChangedMsg:
+		if msg.View == ACLsTab {
+			m.mode = ListView
+			m.activeTab = ACLsTab
+			m.loading = true
+			return m, fetchACLs(m.client)
+		}
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+	}
+	updatedModel, cmd := m.editACLModel.Update(msg)
+	m.editACLModel = updatedModel.(EditACLHuhModel)
+	return m, cmd
+}
+
+func (m Model) updateDeleteACLView(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch msg := msg.(type) {
+	case ViewChangedMsg:
+		if msg.View == ACLsTab {
+			m.mode = ListView
+			m.activeTab = ACLsTab
+			m.loading = true
+			return m, fetchACLs(m.client)
+		}
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+	}
+	updatedModel, cmd := m.deleteACLModel.Update(msg)
+	m.deleteACLModel = updatedModel
 	return m, cmd
 }
 
@@ -735,6 +932,12 @@ func (m Model) View() string {
 		return m.consumerModel.View()
 	case CreateTopicView:
 		return m.createTopicModel.View()
+	case CreateACLView:
+		return m.createACLModel.View()
+	case EditACLView:
+		return m.editACLModel.View()
+	case DeleteACLView:
+		return m.deleteACLModel.View()
 	case EditConfigView:
 		return m.editConfigModel.View()
 	case AIAssistantView:
@@ -1021,7 +1224,39 @@ func (m Model) renderConsumerGroupsView() string {
 }
 
 func (m Model) renderACLsView() string {
-	return "ACLs view - Coming soon..."
+	var sb strings.Builder
+	
+	// Title with icon
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("205"))
+	
+	sb.WriteString(titleStyle.Render("🔐 Access Control Lists (ACLs)"))
+	sb.WriteString("\n\n")
+	
+	// Render ACL table
+	if m.aclTable != nil {
+		if len(m.acls) == 0 {
+			noDataStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("244")).
+				Italic(true)
+			sb.WriteString(noDataStyle.Render("No ACLs found. Press 'C' to create one or 'r' to refresh."))
+		} else {
+			sb.WriteString(m.aclTable.View())
+		}
+	} else {
+		sb.WriteString("Loading ACLs...")
+	}
+	
+	// Error display
+	if m.err != nil {
+		errorStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196")).
+			MarginTop(1)
+		sb.WriteString("\n\n" + errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
+	}
+	
+	return sb.String()
 }
 
 func (m Model) getHelpText() string {
@@ -1036,6 +1271,11 @@ func (m Model) getHelpText() string {
 			return baseHelp + " | Tab: Switch panel | Enter: Consume | P: Produce | C: Create Topic | D: Delete Topic"
 		}
 		return baseHelp + " | Enter: Consume | P: Produce | C: Create Topic | D: Delete Topic"
+	case ACLsTab:
+		if len(m.acls) > 0 {
+			return baseHelp + " | C: Create ACL | e: Edit ACL | D: Delete ACL"
+		}
+		return baseHelp + " | C: Create ACL"
 	default:
 		return baseHelp
 	}

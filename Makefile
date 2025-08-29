@@ -85,6 +85,15 @@ install:
 
 ## run: Build and run the application
 .PHONY: run
+run-dev: build
+	@echo "$(GREEN)Running $(BINARY_NAME)...$(NC)"
+	./$(BINARY_NAME) -b 127.0.0.1:29092 \
+    --sasl \
+    --sasl-protocol SASL_PLAINTEXT \
+    --sasl-mechanism PLAIN \
+    --sasl-username admin \
+    --sasl-password admin-secret
+
 run: build
 	@echo "$(GREEN)Running $(BINARY_NAME)...$(NC)"
 	./$(BINARY_NAME)

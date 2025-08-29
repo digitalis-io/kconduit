@@ -23,7 +23,21 @@ type Client struct {
 	topicsLastFetched time.Time
 }
 
+// SASLConfig holds SASL authentication configuration
+type SASLConfig struct {
+	Enabled    bool
+	Mechanism  string // PLAIN, SCRAM-SHA-256, SCRAM-SHA-512
+	Username   string
+	Password   string
+	Protocol   string // SASL_PLAINTEXT or SASL_SSL
+}
+
 func NewClient(brokers []string) (*Client, error) {
+	return NewClientWithAuth(brokers, nil)
+}
+
+// NewClientWithAuth creates a new Kafka client with optional SASL authentication
+func NewClientWithAuth(brokers []string, saslConfig *SASLConfig) (*Client, error) {
 	log := logger.Get()
 	log.WithField("brokers", brokers).Debug("Creating new Kafka client")
 	
@@ -36,6 +50,36 @@ func NewClient(brokers []string) (*Client, error) {
 	config.Metadata.Retry.Max = 3
 	config.Metadata.Retry.Backoff = 250 * time.Millisecond
 	config.Metadata.Timeout = 10 * time.Second
+	
+	// Configure SASL if provided
+	if saslConfig != nil && saslConfig.Enabled {
+		log.WithFields(map[string]interface{}{
+			"mechanism": saslConfig.Mechanism,
+			"username":  saslConfig.Username,
+			"protocol":  saslConfig.Protocol,
+		}).Info("Configuring SASL authentication")
+		
+		config.Net.SASL.Enable = true
+		config.Net.SASL.User = saslConfig.Username
+		config.Net.SASL.Password = saslConfig.Password
+		
+		// Set SASL mechanism
+		switch strings.ToUpper(saslConfig.Mechanism) {
+		case "PLAIN":
+			config.Net.SASL.Mechanism = sarama.SASLTypePlaintext
+		case "SCRAM-SHA-256":
+			config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA256
+		case "SCRAM-SHA-512":
+			config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
+		default:
+			return nil, fmt.Errorf("unsupported SASL mechanism: %s", saslConfig.Mechanism)
+		}
+		
+		// Set security protocol
+		if strings.ToUpper(saslConfig.Protocol) == "SASL_SSL" {
+			config.Net.TLS.Enable = true
+		}
+	}
 
 	admin, err := sarama.NewClusterAdmin(brokers, config)
 	if err != nil {
@@ -785,4 +829,285 @@ type ConsumerGroupInfo struct {
 	State         string
 	Topics        []string
 	Members       []string
+}
+
+// ACL represents a Kafka ACL entry
+type ACL struct {
+	Principal      string
+	Host           string
+	Operation      string
+	PermissionType string
+	ResourceType   string
+	ResourceName   string
+	PatternType    string
+}
+
+// ListACLs retrieves all ACLs from the cluster
+func (c *Client) ListACLs() ([]ACL, error) {
+	log := logger.Get()
+	log.Info("Listing ACLs")
+
+	// Create a filter to get all ACLs (empty filter matches all)
+	filter := sarama.AclFilter{
+		ResourceType:              sarama.AclResourceAny,
+		ResourcePatternTypeFilter: sarama.AclPatternAny,
+		Operation:                 sarama.AclOperationAny,
+		PermissionType:            sarama.AclPermissionAny,
+	}
+
+	log.WithFields(map[string]interface{}{
+		"filter_resource_type": filter.ResourceType,
+		"filter_pattern_type":  filter.ResourcePatternTypeFilter,
+		"filter_operation":     filter.Operation,
+		"filter_permission":    filter.PermissionType,
+	}).Debug("Listing ACLs with filter")
+
+	result, err := c.admin.ListAcls(filter)
+	if err != nil {
+		log.WithError(err).Error("Failed to describe ACLs")
+		return nil, fmt.Errorf("failed to describe ACLs: %w", err)
+	}
+	
+	log.WithField("count", len(result)).Debug("ACL resources found")
+
+	var acls []ACL
+	for _, resourceAcls := range result {
+		resourceType := getResourceTypeName(resourceAcls.Resource.ResourceType)
+		resourceName := resourceAcls.Resource.ResourceName
+		patternType := getPatternTypeName(resourceAcls.Resource.ResourcePatternType)
+
+		for _, acl := range resourceAcls.Acls {
+			acls = append(acls, ACL{
+				Principal:      acl.Principal,
+				Host:           acl.Host,
+				Operation:      getOperationName(acl.Operation),
+				PermissionType: getPermissionTypeName(acl.PermissionType),
+				ResourceType:   resourceType,
+				ResourceName:   resourceName,
+				PatternType:    patternType,
+			})
+		}
+	}
+
+	log.WithField("count", len(acls)).Info("Successfully listed ACLs")
+	return acls, nil
+}
+
+// CreateACL creates a new ACL in the cluster
+func (c *Client) CreateACL(acl ACL) error {
+	log := logger.Get()
+	log.WithFields(map[string]interface{}{
+		"principal":      acl.Principal,
+		"resource":       acl.ResourceName,
+		"resourceType":   acl.ResourceType,
+		"operation":      acl.Operation,
+		"permissionType": acl.PermissionType,
+		"patternType":    acl.PatternType,
+		"host":           acl.Host,
+	}).Info("Creating ACL")
+
+	resource := sarama.Resource{
+		ResourceType:        parseResourceType(acl.ResourceType),
+		ResourceName:        acl.ResourceName,
+		ResourcePatternType: parsePatternType(acl.PatternType),
+	}
+
+	aclCreation := sarama.Acl{
+		Principal:      acl.Principal,
+		Host:           acl.Host,
+		Operation:      parseOperation(acl.Operation),
+		PermissionType: parsePermissionType(acl.PermissionType),
+	}
+
+	log.WithFields(map[string]interface{}{
+		"resource_type_parsed": resource.ResourceType,
+		"pattern_type_parsed":  resource.ResourcePatternType,
+		"operation_parsed":     aclCreation.Operation,
+		"permission_parsed":    aclCreation.PermissionType,
+	}).Debug("Creating ACL with parsed values")
+
+	err := c.admin.CreateACL(resource, aclCreation)
+	if err != nil {
+		log.WithError(err).Error("Failed to create ACL")
+		return fmt.Errorf("failed to create ACL: %w", err)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"principal":    acl.Principal,
+		"resource":     acl.ResourceName,
+		"resourceType": acl.ResourceType,
+		"operation":    acl.Operation,
+	}).Info("Successfully created ACL")
+	return nil
+}
+
+// DeleteACL deletes an ACL from the cluster
+func (c *Client) DeleteACL(acl ACL) error {
+	log := logger.Get()
+	log.WithFields(map[string]interface{}{
+		"principal":    acl.Principal,
+		"resource":     acl.ResourceName,
+		"resourceType": acl.ResourceType,
+		"operation":    acl.Operation,
+	}).Info("Deleting ACL")
+
+	filter := sarama.AclFilter{
+		ResourceType:              parseResourceType(acl.ResourceType),
+		ResourceName:              &acl.ResourceName,
+		ResourcePatternTypeFilter: parsePatternType(acl.PatternType),
+		Principal:                 &acl.Principal,
+		Host:                      &acl.Host,
+		Operation:                 parseOperation(acl.Operation),
+		PermissionType:            parsePermissionType(acl.PermissionType),
+	}
+
+	matches, err := c.admin.DeleteACL(filter, false)
+	if err != nil {
+		log.WithError(err).Error("Failed to delete ACL")
+		return fmt.Errorf("failed to delete ACL: %w", err)
+	}
+
+	if len(matches) == 0 {
+		return fmt.Errorf("no matching ACLs found to delete")
+	}
+
+	log.WithField("deleted", len(matches)).Info("Successfully deleted ACL(s)")
+	return nil
+}
+
+// Helper functions to convert between Sarama types and strings
+func getResourceTypeName(t sarama.AclResourceType) string {
+	switch t {
+	case sarama.AclResourceTopic:
+		return "Topic"
+	case sarama.AclResourceGroup:
+		return "Group"
+	case sarama.AclResourceCluster:
+		return "Cluster"
+	case sarama.AclResourceTransactionalID:
+		return "TransactionalId"
+	case sarama.AclResourceDelegationToken:
+		return "DelegationToken"
+	default:
+		return "Unknown"
+	}
+}
+
+func parseResourceType(s string) sarama.AclResourceType {
+	switch s {
+	case "Topic":
+		return sarama.AclResourceTopic
+	case "Group":
+		return sarama.AclResourceGroup
+	case "Cluster":
+		return sarama.AclResourceCluster
+	case "TransactionalId":
+		return sarama.AclResourceTransactionalID
+	case "DelegationToken":
+		return sarama.AclResourceDelegationToken
+	default:
+		return sarama.AclResourceUnknown
+	}
+}
+
+func getPatternTypeName(t sarama.AclResourcePatternType) string {
+	switch t {
+	case sarama.AclPatternLiteral:
+		return "Literal"
+	case sarama.AclPatternPrefixed:
+		return "Prefixed"
+	default:
+		return "Any"
+	}
+}
+
+func parsePatternType(s string) sarama.AclResourcePatternType {
+	switch s {
+	case "Literal":
+		return sarama.AclPatternLiteral
+	case "Prefixed":
+		return sarama.AclPatternPrefixed
+	default:
+		return sarama.AclPatternAny
+	}
+}
+
+func getOperationName(o sarama.AclOperation) string {
+	switch o {
+	case sarama.AclOperationRead:
+		return "Read"
+	case sarama.AclOperationWrite:
+		return "Write"
+	case sarama.AclOperationCreate:
+		return "Create"
+	case sarama.AclOperationDelete:
+		return "Delete"
+	case sarama.AclOperationAlter:
+		return "Alter"
+	case sarama.AclOperationDescribe:
+		return "Describe"
+	case sarama.AclOperationClusterAction:
+		return "ClusterAction"
+	case sarama.AclOperationDescribeConfigs:
+		return "DescribeConfigs"
+	case sarama.AclOperationAlterConfigs:
+		return "AlterConfigs"
+	case sarama.AclOperationIdempotentWrite:
+		return "IdempotentWrite"
+	case sarama.AclOperationAll:
+		return "All"
+	default:
+		return "Unknown"
+	}
+}
+
+func parseOperation(s string) sarama.AclOperation {
+	switch s {
+	case "Read":
+		return sarama.AclOperationRead
+	case "Write":
+		return sarama.AclOperationWrite
+	case "Create":
+		return sarama.AclOperationCreate
+	case "Delete":
+		return sarama.AclOperationDelete
+	case "Alter":
+		return sarama.AclOperationAlter
+	case "Describe":
+		return sarama.AclOperationDescribe
+	case "ClusterAction":
+		return sarama.AclOperationClusterAction
+	case "DescribeConfigs":
+		return sarama.AclOperationDescribeConfigs
+	case "AlterConfigs":
+		return sarama.AclOperationAlterConfigs
+	case "IdempotentWrite":
+		return sarama.AclOperationIdempotentWrite
+	case "All":
+		return sarama.AclOperationAll
+	default:
+		return sarama.AclOperationUnknown
+	}
+}
+
+func getPermissionTypeName(p sarama.AclPermissionType) string {
+	switch p {
+	case sarama.AclPermissionAllow:
+		return "Allow"
+	case sarama.AclPermissionDeny:
+		return "Deny"
+	default:
+		return "Unknown"
+	}
+}
+
+func parsePermissionType(s string) sarama.AclPermissionType {
+	switch s {
+	case "Allow":
+		return sarama.AclPermissionAllow
+	case "Deny":
+		return sarama.AclPermissionDeny
+	default:
+		return sarama.AclPermissionUnknown
+	}
 }

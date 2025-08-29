@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"io"
 	"os"
 	"sync"
 
@@ -36,7 +37,21 @@ func Init(level, logFile string) error {
 			}
 			Log.SetOutput(f)
 		} else {
-			Log.SetOutput(os.Stderr) // Use stderr to not interfere with TUI
+			// When no log file is specified, discard logs to avoid interfering with TUI
+			// Unless we're in debug mode where we might want to see the output
+			if logLevel == logrus.DebugLevel {
+				// In debug mode without a file, create a debug log file
+				var f *os.File
+				f, err = os.OpenFile("kconduit-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+				if err != nil {
+					Log.SetOutput(io.Discard)
+				} else {
+					Log.SetOutput(f)
+				}
+			} else {
+				// Discard all logs when no file is specified and not in debug mode
+				Log.SetOutput(io.Discard)
+			}
 		}
 		
 		// Set formatter
@@ -51,7 +66,11 @@ func Init(level, logFile string) error {
 // Get returns the global logger instance, initializing with defaults if needed
 func Get() *logrus.Logger {
 	if Log == nil {
+		// Initialize with info level and no output file (will discard logs)
 		Init("info", "")
 	}
 	return Log
 }
+
+// Fields is an alias for logrus.Fields for convenience
+type Fields = logrus.Fields
