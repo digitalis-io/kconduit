@@ -32,7 +32,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create consumer: %v", err)
 	}
-	defer c.Close()
+	defer func() {
+		if err := c.Close(); err != nil {
+			log.Printf("Error closing consumer: %v", err)
+		}
+	}()
 
 	// Subscribe to the topic
 	err = c.SubscribeTopics([]string{topic}, nil)

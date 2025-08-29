@@ -67,7 +67,7 @@ func Init(level, logFile string) error {
 func Get() *logrus.Logger {
 	if Log == nil {
 		// Initialize with info level and no output file (will discard logs)
-		Init("info", "")
+		_ = Init("info", "")
 	}
 	return Log
 }

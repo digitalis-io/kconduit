@@ -89,7 +89,9 @@ func NewClientWithAuth(brokers []string, saslConfig *SASLConfig) (*Client, error
 
 	producer, err := sarama.NewSyncProducer(brokers, config)
 	if err != nil {
-		admin.Close()
+		if closeErr := admin.Close(); closeErr != nil {
+			log.WithError(closeErr).Warn("Failed to close admin client after producer creation failure")
+		}
 		log.WithError(err).WithField("brokers", brokers).Error("Failed to create producer")
 		return nil, fmt.Errorf("failed to create producer: %w", err)
 	}
@@ -186,7 +188,11 @@ func (c *Client) GetTopicConfig(topicName string) (*TopicConfig, error) {
 	// Get partition details
 	controller, err := c.admin.Controller()
 	if err == nil {
-		defer controller.Close()
+		defer func() {
+			if closeErr := controller.Close(); closeErr != nil {
+				logger.Get().WithError(closeErr).Warn("Failed to close controller")
+			}
+		}()
 
 		request := &sarama.MetadataRequest{
 			Topics: []string{topicName},
@@ -222,7 +228,11 @@ func (c *Client) GetBrokers() ([]BrokerInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get controller: %w", err)
 	}
-	defer controller.Close()
+	defer func() {
+		if err := controller.Close(); err != nil {
+			log.WithError(err).Warn("Failed to close controller connection")
+		}
+	}()
 	
 	// Store the controller's ID - this is the actual active controller
 	controllerBrokerID := controller.ID()
@@ -442,7 +452,9 @@ func (c *Client) ConsumeMessages(ctx context.Context, topic string, messageChan 
 
 	partitions, err := consumer.Partitions(topic)
 	if err != nil {
-		consumer.Close()
+		if closeErr := consumer.Close(); closeErr != nil {
+			logger.Get().WithError(closeErr).Warn("Failed to close consumer after partition error")
+		}
 		return fmt.Errorf("failed to get partitions: %w", err)
 	}
 
@@ -453,9 +465,13 @@ func (c *Client) ConsumeMessages(ctx context.Context, topic string, messageChan 
 		if err != nil {
 			// Close all previously opened partition consumers
 			for _, pcons := range partitionConsumers {
-				pcons.Close()
+				if closeErr := pcons.Close(); closeErr != nil {
+					logger.Get().WithError(closeErr).Warn("Failed to close partition consumer during cleanup")
+				}
 			}
-			consumer.Close()
+			if closeErr := consumer.Close(); closeErr != nil {
+				logger.Get().WithError(closeErr).Warn("Failed to close consumer after consume partition error")
+			}
 			return fmt.Errorf("failed to consume partition %d: %w", partition, err)
 		}
 		partitionConsumers = append(partitionConsumers, pc)
@@ -509,9 +525,13 @@ func (c *Client) ConsumeMessages(ctx context.Context, topic string, messageChan 
 
 	// Clean up all partition consumers
 	for _, pc := range partitionConsumers {
-		pc.Close()
+		if closeErr := pc.Close(); closeErr != nil {
+			logger.Get().WithError(closeErr).Warn("Failed to close partition consumer during cleanup")
+		}
 	}
-	consumer.Close()
+	if closeErr := consumer.Close(); closeErr != nil {
+		logger.Get().WithError(closeErr).Warn("Failed to close consumer during cleanup")
+	}
 
 	return nil
 }
@@ -656,8 +676,9 @@ func (c *Client) GetConsumerGroups() ([]ConsumerGroupInfo, error) {
 			// Parse member metadata to get topics
 			// Note: MemberMetadata contains the subscription info
 			if len(member.MemberMetadata) > 0 {
-				// In production, you'd parse the metadata properly
-				// For now we'll use a placeholder
+				// TODO: Parse member metadata to extract subscription details
+				// The metadata contains encoded consumer protocol information
+				logger.Get().WithField("member", member.MemberId).Debug("Member has metadata to be parsed")
 			}
 		}
 		
@@ -707,7 +728,11 @@ func (c *Client) calculateConsumerLag(groupID string, topics []string) int64 {
 		log.WithError(err).Debug("Failed to create consumer for lag calculation")
 		return 0
 	}
-	defer consumer.Close()
+	defer func() {
+		if closeErr := consumer.Close(); closeErr != nil {
+			log.WithError(closeErr).Debug("Failed to close consumer during lag calculation")
+		}
+	}()
 	
 	// Calculate lag for each topic/partition
 	for topic, partitionOffsets := range offsets.Blocks {
@@ -741,7 +766,9 @@ func (c *Client) calculateConsumerLag(groupID string, topics []string) int64 {
 			
 			// Get high water mark
 			highWaterMark := pc.HighWaterMarkOffset()
-			pc.Close()
+			if closeErr := pc.Close(); closeErr != nil {
+				log.WithField("topic", topic).WithField("partition", partitionID).WithError(closeErr).Debug("Failed to close partition consumer")
+			}
 			
 			// Calculate lag for this partition
 			if highWaterMark > 0 && block.Offset >= 0 {
@@ -872,9 +899,10 @@ func (c *Client) ListACLs() ([]ACL, error) {
 
 	var acls []ACL
 	for _, resourceAcls := range result {
-		resourceType := getResourceTypeName(resourceAcls.Resource.ResourceType)
-		resourceName := resourceAcls.Resource.ResourceName
-		patternType := getPatternTypeName(resourceAcls.Resource.ResourcePatternType)
+		resource := resourceAcls.Resource
+		resourceType := getResourceTypeName(resource.ResourceType)
+		resourceName := resource.ResourceName
+		patternType := getPatternTypeName(resource.ResourcePatternType)
 
 		for _, acl := range resourceAcls.Acls {
 			acls = append(acls, ACL{

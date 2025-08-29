@@ -540,7 +540,7 @@ func (m *AIAssistantModel) processAIQuery(query string) tea.Cmd {
 
 func (m *AIAssistantModel) queryOpenAI(query string) (string, error) {
 	if m.config.OpenAIKey == "" {
-		return "", fmt.Errorf("OpenAI API key not configured. Set OPENAI_API_KEY environment variable")
+		return "", fmt.Errorf("openAI API key not configured; set OPENAI_API_KEY environment variable")
 	}
 
 	requestBody := map[string]interface{}{
@@ -570,7 +570,12 @@ func (m *AIAssistantModel) queryOpenAI(query string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Body close errors are typically safe to ignore in HTTP clients
+			_ = err
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -600,7 +605,7 @@ func (m *AIAssistantModel) queryOpenAI(query string) (string, error) {
 
 func (m *AIAssistantModel) queryGemini(query string) (string, error) {
 	if m.config.GeminiKey == "" {
-		return "", fmt.Errorf("Gemini API key not configured. Set GEMINI_API_KEY environment variable")
+		return "", fmt.Errorf("gemini API key not configured; set GEMINI_API_KEY environment variable")
 	}
 
 	fullPrompt := aiSystemPrompt + "\n\nUser: " + query
@@ -639,7 +644,12 @@ func (m *AIAssistantModel) queryGemini(query string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Body close errors are typically safe to ignore in HTTP clients
+			_ = err
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -647,7 +657,7 @@ func (m *AIAssistantModel) queryGemini(query string) (string, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Gemini API request failed with status %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("gemini API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var result map[string]interface{}
@@ -683,7 +693,7 @@ func (m *AIAssistantModel) queryGemini(query string) (string, error) {
 
 func (m *AIAssistantModel) queryAnthropic(query string) (string, error) {
 	if m.config.AnthropicKey == "" {
-		return "", fmt.Errorf("Anthropic API key not configured. Set ANTHROPIC_API_KEY environment variable")
+		return "", fmt.Errorf("anthropic API key not configured; set ANTHROPIC_API_KEY environment variable")
 	}
 
 	requestBody := map[string]interface{}{
@@ -715,7 +725,12 @@ func (m *AIAssistantModel) queryAnthropic(query string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Body close errors are typically safe to ignore in HTTP clients
+			_ = err
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -723,7 +738,7 @@ func (m *AIAssistantModel) queryAnthropic(query string) (string, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Anthropic API request failed with status %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("anthropic API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var result map[string]interface{}
@@ -770,7 +785,12 @@ func (m *AIAssistantModel) queryOllama(query string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to Ollama. Make sure it's running: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Body close errors are typically safe to ignore in HTTP clients
+			_ = err
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -778,7 +798,7 @@ func (m *AIAssistantModel) queryOllama(query string) (string, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Ollama request failed with status %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("ollama request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var result map[string]interface{}
@@ -868,7 +888,10 @@ func (m *AIAssistantModel) executeMultipleCommands(commands []map[string]interfa
 						if configs, ok := command["configs"].(map[string]interface{}); ok {
 							for key, value := range configs {
 								if strValue, ok := value.(string); ok {
-									m.client.UpdateTopicConfig(name, key, strValue)
+									if err := m.client.UpdateTopicConfig(name, key, strValue); err != nil {
+										// Log error but continue processing other configs
+										fmt.Printf("Failed to update config %s for topic %s: %v\n", key, name, err)
+									}
 								}
 							}
 						}

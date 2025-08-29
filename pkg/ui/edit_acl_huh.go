@@ -158,6 +158,8 @@ func (m EditACLHuhModel) updateACLs() tea.Msg {
 	err := m.client.DeleteACL(m.originalACL)
 	if err != nil {
 		// Log but don't fail - the ACL might have already been deleted
+		// TODO: Consider showing a warning to the user about deletion failure
+		_ = err // Explicitly ignore the error as we want to continue with creation
 	}
 	
 	// Create new ACLs for each selected operation

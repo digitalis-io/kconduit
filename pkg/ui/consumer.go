@@ -32,25 +32,6 @@ var (
 		Foreground(lipgloss.Color("229")).
 		Background(lipgloss.Color("57")).
 		Padding(0, 1)
-
-	messageStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(0, 1).
-		MarginBottom(1)
-
-	headerStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("86"))
-
-	keyStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("214"))
-
-	offsetStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241"))
-
-	timestampStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
 )
 
 func NewConsumerModel(topic string, client *kafka.Client) ConsumerModel {
