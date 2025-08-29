@@ -43,29 +43,30 @@ services:
     environment:
       KAFKA_NODE_ID: 4
       KAFKA_PROCESS_ROLES: broker
-      KAFKA_LISTENERS: 'BROKER://:19092,BROKER_HOST://:9092'
-      KAFKA_ADVERTISED_LISTENERS: 'BROKER://broker-1:19092,BROKER_HOST://localhost:29092'
+      KAFKA_LISTENERS: 'BROKER://:19092,BROKER_HOST://:9092,INTERNAL://:9094'
+      KAFKA_ADVERTISED_LISTENERS: 'BROKER://broker-1:19092,BROKER_HOST://localhost:29092,INTERNAL://broker-1:9094'
       KAFKA_INTER_BROKER_LISTENER_NAME: BROKER
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,SASL:SASL_PLAINTEXT,BROKER_HOST:SASL_PLAINTEXT,BROKER:PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,SASL:SASL_PLAINTEXT,BROKER_HOST:SASL_PLAINTEXT,BROKER:PLAINTEXT,INTERNAL:SASL_PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@controller-1:9093,2@controller-2:9093,3@controller-3:9093
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       # ACLs config
       KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
       KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
-      KAFKA_SUPER_USERS: "User:admin,User:ANONYMOUS,User:broker"
+      KAFKA_SUPER_USERS: "User:admin,User:broker"
       KAFKA_SASL_MECHANISM_CONTROLLER_PROTOCOL: PLAIN
       KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
       KAFKA_OPTS: -Djava.security.auth.login.config=/opt/kafka/config/kafka_server_jaas.conf
 
     volumes:
       - ./kafka_jaas.conf:/opt/kafka/config/kafka_server_jaas.conf
+      - ./client.properties:/opt/kafka/config/client.properties
     depends_on:
       - controller-1
       - controller-2
       - controller-3
     healthcheck:
-      test: ["CMD-SHELL", "./opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      test: ["CMD-SHELL", "./opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 --command-config /opt/kafka/config/client.properties > /dev/null 2>&1"]
       interval: 10s
       timeout: 10s
       retries: 5
@@ -78,29 +79,30 @@ services:
     environment:
       KAFKA_NODE_ID: 5
       KAFKA_PROCESS_ROLES: broker
-      KAFKA_LISTENERS: 'BROKER://:19092,BROKER_HOST://:9092'
-      KAFKA_ADVERTISED_LISTENERS: 'BROKER://broker-2:19092,BROKER_HOST://localhost:39092'
+      KAFKA_LISTENERS: 'BROKER://:19092,BROKER_HOST://:9092,INTERNAL://:9094'
+      KAFKA_ADVERTISED_LISTENERS: 'BROKER://broker-2:19092,BROKER_HOST://localhost:39092,INTERNAL://broker-2:9094'
       KAFKA_INTER_BROKER_LISTENER_NAME: BROKER
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,SASL:SASL_PLAINTEXT,BROKER_HOST:SASL_PLAINTEXT,BROKER:PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,SASL:SASL_PLAINTEXT,BROKER_HOST:SASL_PLAINTEXT,BROKER:PLAINTEXT,INTERNAL:SASL_PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@controller-1:9093,2@controller-2:9093,3@controller-3:9093
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       # ACLs config
       KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
       KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
-      KAFKA_SUPER_USERS: "User:admin,User:ANONYMOUS,User:broker"
+      KAFKA_SUPER_USERS: "User:admin,User:broker"
       KAFKA_SASL_MECHANISM_CONTROLLER_PROTOCOL: PLAIN
       KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
       KAFKA_OPTS: -Djava.security.auth.login.config=/opt/kafka/config/kafka_server_jaas.conf
 
     volumes:
       - ./kafka_jaas.conf:/opt/kafka/config/kafka_server_jaas.conf
+      - ./client.properties:/opt/kafka/config/client.properties
     depends_on:
       - controller-1
       - controller-2
       - controller-3
     healthcheck:
-      test: ["CMD-SHELL", "./opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      test: ["CMD-SHELL", "./opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 --command-config /opt/kafka/config/client.properties > /dev/null 2>&1"]
       interval: 10s
       timeout: 10s
       retries: 5
@@ -113,29 +115,30 @@ services:
     environment:
       KAFKA_NODE_ID: 6
       KAFKA_PROCESS_ROLES: broker
-      KAFKA_LISTENERS: 'BROKER://:19092,BROKER_HOST://:9092'
-      KAFKA_ADVERTISED_LISTENERS: 'BROKER://broker-3:19092,BROKER_HOST://localhost:49092'
+      KAFKA_LISTENERS: 'BROKER://:19092,BROKER_HOST://:9092,INTERNAL://:9094'
+      KAFKA_ADVERTISED_LISTENERS: 'BROKER://broker-3:19092,BROKER_HOST://localhost:49092,INTERNAL://broker-3:9094'
       KAFKA_INTER_BROKER_LISTENER_NAME: BROKER
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,SASL:SASL_PLAINTEXT,BROKER_HOST:SASL_PLAINTEXT,BROKER:PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,SASL:SASL_PLAINTEXT,BROKER_HOST:SASL_PLAINTEXT,BROKER:PLAINTEXT,INTERNAL:SASL_PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@controller-1:9093,2@controller-2:9093,3@controller-3:9093
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       # ACLs config
       KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
       KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
-      KAFKA_SUPER_USERS: "User:admin,User:ANONYMOUS,User:broker"
+      KAFKA_SUPER_USERS: "User:admin,User:broker"
       KAFKA_SASL_MECHANISM_CONTROLLER_PROTOCOL: PLAIN
       KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
       KAFKA_OPTS: -Djava.security.auth.login.config=/opt/kafka/config/kafka_server_jaas.conf
 
     volumes:
       - ./kafka_jaas.conf:/opt/kafka/config/kafka_server_jaas.conf
+      - ./client.properties:/opt/kafka/config/client.properties
     depends_on:
       - controller-1
       - controller-2
       - controller-3
     healthcheck:
-      test: ["CMD-SHELL", "./opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      test: ["CMD-SHELL", "./opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 --command-config /opt/kafka/config/client.properties > /dev/null 2>&1"]
       interval: 10s
       timeout: 10s
       retries: 5
@@ -147,8 +150,11 @@ services:
       - "8088:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: broker-1:9092,broker-2:9092,broker-3:9092
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: broker-1:9094,broker-2:9094,broker-3:9094
       KAFKA_CLUSTERS_0_READONLY: "false"
+      KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_MECHANISM: PLAIN
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="admin-secret";'
     depends_on:
       broker-1:
         condition: service_healthy
