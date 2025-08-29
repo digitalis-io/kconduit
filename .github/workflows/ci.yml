@@ -75,7 +75,7 @@ jobs:
       - name: Build
         run: |
           go build -v ./...
-          go build -v -o kconduit ./cmd/kconduit
+          go build -v -o kconduit cmd/kconduit/main.go
 
       - name: Test binary
         run: |
