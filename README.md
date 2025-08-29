@@ -50,6 +50,32 @@ make build
 ./kconduit -b localhost:9092 --log-level debug --log-file kconduit.log
 ```
 
+### SASL Authentication
+```bash
+# Connect with SASL/PLAIN authentication
+./kconduit -b localhost:29092 \
+  --sasl \
+  --sasl-mechanism PLAIN \
+  --sasl-username admin \
+  --sasl-password admin-secret \
+  --sasl-protocol SASL_PLAINTEXT
+
+# Connect with SASL/SCRAM-SHA-256
+./kconduit -b localhost:9092 \
+  --sasl \
+  --sasl-mechanism SCRAM-SHA-256 \
+  --sasl-username alice \
+  --sasl-password alice-secret
+
+# Connect with SASL over SSL
+./kconduit -b broker:9093 \
+  --sasl \
+  --sasl-mechanism PLAIN \
+  --sasl-username admin \
+  --sasl-password admin-secret \
+  --sasl-protocol SASL_SSL
+```
+
 ### AI Assistant Configuration
 ```bash
 # Using OpenAI
@@ -102,6 +128,13 @@ ollama serve  # In another terminal
 - `Enter` - Confirm deletion (only when name matches)
 - `Esc` - Cancel deletion
 
+### ACLs Tab
+- `↑/↓` - Navigate through ACL entries
+- `C` - Create new ACL
+- `Tab` - Navigate between fields in create dialog
+- `Enter/Ctrl+S` - Save new ACL
+- `Esc` - Cancel/Return to ACL list
+
 ## 🤖 AI Assistant Commands
 
 ### Topic Management
@@ -148,6 +181,11 @@ ollama serve  # In another terminal
 | `KCONDUIT_BROKERS` | Kafka broker addresses | localhost:9092 |
 | `KCONDUIT_LOG_LEVEL` | Log level (debug, info, warn, error) | info |
 | `KCONDUIT_LOG_FILE` | Log file path | stderr |
+| `KCONDUIT_SASL_ENABLED` | Enable SASL authentication | false |
+| `KCONDUIT_SASL_MECHANISM` | SASL mechanism | PLAIN |
+| `KCONDUIT_SASL_USERNAME` | SASL username | - |
+| `KCONDUIT_SASL_PASSWORD` | SASL password | - |
+| `KCONDUIT_SASL_PROTOCOL` | Security protocol | SASL_PLAINTEXT |
 | `OPENAI_API_KEY` | OpenAI API key for AI assistant | - |
 | `OPENAI_MODEL` | OpenAI model to use | gpt-3.5-turbo |
 | `GEMINI_API_KEY` | Google Gemini API key | - |
@@ -166,6 +204,11 @@ ollama serve  # In another terminal
 | `--log-file` | Log file path (empty for stderr) | - |
 | `--ai-engine` | AI engine (openai, gemini, anthropic, ollama) | auto-detect |
 | `--ai-model` | AI model to use | provider default |
+| `--sasl` | Enable SASL authentication | false |
+| `--sasl-mechanism` | SASL mechanism (PLAIN, SCRAM-SHA-256, SCRAM-SHA-512) | PLAIN |
+| `--sasl-username` | SASL username | - |
+| `--sasl-password` | SASL password | - |
+| `--sasl-protocol` | Security protocol (SASL_PLAINTEXT, SASL_SSL) | SASL_PLAINTEXT |
 
 ## 🏗️ Building & Development
 
@@ -217,6 +260,14 @@ docker-compose -f tests/docker-compose.yaml up -d
 - ✅ Calculate consumer lag per group
 - ✅ View group members and state
 - ✅ Query groups by various criteria
+
+### ACL Operations
+- ✅ List all ACLs with detailed information
+- ✅ Create new ACLs with validation
+- ✅ Support for all resource types (Topic, Group, Cluster, TransactionalId)
+- ✅ Support for all operations (Read, Write, Create, Delete, etc.)
+- ✅ Pattern-based resource matching (Literal, Prefixed, Any)
+- ✅ Allow and Deny permissions
 
 ### Broker Operations
 - ✅ List all brokers with status
