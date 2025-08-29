@@ -131,8 +131,9 @@ ollama serve  # In another terminal
 ### ACLs Tab
 - `↑/↓` - Navigate through ACL entries
 - `C` - Create new ACL
-- `Tab` - Navigate between fields in create dialog
-- `Enter/Ctrl+S` - Save new ACL
+- `e` - Edit selected ACL
+- `Tab` - Navigate between fields in create/edit dialog
+- `Enter/Ctrl+S` - Save ACL changes
 - `Esc` - Cancel/Return to ACL list
 
 ## 🤖 AI Assistant Commands
@@ -263,11 +264,14 @@ docker-compose -f tests/docker-compose.yaml up -d
 
 ### ACL Operations
 - ✅ List all ACLs with detailed information
-- ✅ Create new ACLs with validation
+- ✅ Create new ACLs with beautiful form interface
+- ✅ Edit existing ACLs with pre-filled values
+- ✅ Multi-select operations - create multiple ACLs at once
 - ✅ Support for all resource types (Topic, Group, Cluster, TransactionalId)
 - ✅ Support for all operations (Read, Write, Create, Delete, etc.)
 - ✅ Pattern-based resource matching (Literal, Prefixed, Any)
 - ✅ Allow and Deny permissions
+- ✅ Input validation and error handling
 
 ### Broker Operations
 - ✅ List all brokers with status

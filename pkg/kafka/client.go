@@ -855,11 +855,20 @@ func (c *Client) ListACLs() ([]ACL, error) {
 		PermissionType:            sarama.AclPermissionAny,
 	}
 
+	log.WithFields(map[string]interface{}{
+		"filter_resource_type": filter.ResourceType,
+		"filter_pattern_type":  filter.ResourcePatternTypeFilter,
+		"filter_operation":     filter.Operation,
+		"filter_permission":    filter.PermissionType,
+	}).Debug("Listing ACLs with filter")
+
 	result, err := c.admin.ListAcls(filter)
 	if err != nil {
 		log.WithError(err).Error("Failed to describe ACLs")
 		return nil, fmt.Errorf("failed to describe ACLs: %w", err)
 	}
+	
+	log.WithField("count", len(result)).Debug("ACL resources found")
 
 	var acls []ACL
 	for _, resourceAcls := range result {
@@ -888,10 +897,13 @@ func (c *Client) ListACLs() ([]ACL, error) {
 func (c *Client) CreateACL(acl ACL) error {
 	log := logger.Get()
 	log.WithFields(map[string]interface{}{
-		"principal":    acl.Principal,
-		"resource":     acl.ResourceName,
-		"resourceType": acl.ResourceType,
-		"operation":    acl.Operation,
+		"principal":      acl.Principal,
+		"resource":       acl.ResourceName,
+		"resourceType":   acl.ResourceType,
+		"operation":      acl.Operation,
+		"permissionType": acl.PermissionType,
+		"patternType":    acl.PatternType,
+		"host":           acl.Host,
 	}).Info("Creating ACL")
 
 	resource := sarama.Resource{
@@ -907,13 +919,25 @@ func (c *Client) CreateACL(acl ACL) error {
 		PermissionType: parsePermissionType(acl.PermissionType),
 	}
 
+	log.WithFields(map[string]interface{}{
+		"resource_type_parsed": resource.ResourceType,
+		"pattern_type_parsed":  resource.ResourcePatternType,
+		"operation_parsed":     aclCreation.Operation,
+		"permission_parsed":    aclCreation.PermissionType,
+	}).Debug("Creating ACL with parsed values")
+
 	err := c.admin.CreateACL(resource, aclCreation)
 	if err != nil {
 		log.WithError(err).Error("Failed to create ACL")
 		return fmt.Errorf("failed to create ACL: %w", err)
 	}
 
-	log.Info("Successfully created ACL")
+	log.WithFields(map[string]interface{}{
+		"principal":    acl.Principal,
+		"resource":     acl.ResourceName,
+		"resourceType": acl.ResourceType,
+		"operation":    acl.Operation,
+	}).Info("Successfully created ACL")
 	return nil
 }
 
