@@ -30,6 +30,7 @@ type EditACLHuhModel struct {
 	patternType    string
 	operations     []string
 	permissionType string
+	confirm        bool
 }
 
 func NewEditACLHuhModel(client *kafka.Client, acl kafka.ACL) EditACLHuhModel {
@@ -43,6 +44,7 @@ func NewEditACLHuhModel(client *kafka.Client, acl kafka.ACL) EditACLHuhModel {
 		patternType:    acl.PatternType,
 		operations:     []string{acl.Operation}, // Start with the existing operation
 		permissionType: acl.PermissionType,
+		confirm:        false,
 	}
 	
 	// Create spinner
@@ -125,6 +127,13 @@ func (m *EditACLHuhModel) buildForm() {
 				Description("Allow or Deny the selected operations").
 				Options(permissionTypes...).
 				Value(&m.permissionType),
+
+			huh.NewConfirm().
+				Title("Ready to update ACL?").
+				Description("Press Enter to save, or Esc to cancel").
+				Affirmative("Save").
+				Negative("Cancel").
+				Value(&m.confirm),
 		),
 	)
 	
@@ -188,6 +197,15 @@ func (m *EditACLHuhModel) validatePrincipal(s string) error {
 	}
 	if !strings.HasPrefix(s, "User:") && !strings.HasPrefix(s, "Group:") {
 		return fmt.Errorf("must start with 'User:' or 'Group:'")
+	}
+	// Check that there's actually a name after the prefix
+	if s == "User:" || s == "Group:" {
+		return fmt.Errorf("principal name cannot be empty (e.g., User:alice, User:*, Group:admins)")
+	}
+	// Validate that after "User:" or "Group:" there's at least one character
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+		return fmt.Errorf("principal name cannot be empty (e.g., User:alice, User:*, Group:admins)")
 	}
 	return nil
 }
@@ -268,12 +286,18 @@ func (m EditACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		
 		// Check if form is complete
 		if m.form.State == huh.StateCompleted {
-			// Form completed, update ACLs
-			m.updating = true
-			return m, tea.Batch(
-				m.spinner.Tick,
-				m.updateACLs,
-			)
+			// Check if user confirmed
+			if m.confirm {
+				// Form completed and confirmed, update ACLs
+				m.updating = true
+				return m, tea.Batch(
+					m.spinner.Tick,
+					m.updateACLs,
+				)
+			} else {
+				// User cancelled
+				return m, func() tea.Msg { return ViewChangedMsg{View: ACLsTab} }
+			}
 		}
 	}
 	

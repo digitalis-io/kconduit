@@ -29,6 +29,7 @@ type CreateACLHuhModel struct {
 	patternType    string
 	operations     []string
 	permissionType string
+	confirm        bool
 }
 
 var (
@@ -69,13 +70,14 @@ var (
 func NewCreateACLHuhModel(client *kafka.Client) CreateACLHuhModel {
 	m := CreateACLHuhModel{
 		client:         client,
-		principal:      "User:",
+		principal:      "User:*",  // Default to all users
 		host:           "*",
 		resourceType:   "Topic",
 		resourceName:   "*",
 		patternType:    "Literal",
 		operations:     []string{"Read"},
 		permissionType: "Allow",
+		confirm:        false,
 	}
 
 	// Create spinner
@@ -151,6 +153,13 @@ func (m *CreateACLHuhModel) buildForm() {
 				Description("Allow or Deny").
 				Options(permissionTypes...).
 				Value(&m.permissionType),
+
+			huh.NewConfirm().
+				Title("Ready to create ACL?").
+				Description("Press Enter to save, or Esc to cancel").
+				Affirmative("Save").
+				Negative("Cancel").
+				Value(&m.confirm),
 		),
 	)
 
@@ -169,6 +178,15 @@ func (m *CreateACLHuhModel) validatePrincipal(s string) error {
 	}
 	if !strings.HasPrefix(s, "User:") && !strings.HasPrefix(s, "Group:") {
 		return fmt.Errorf("must start with 'User:' or 'Group:'")
+	}
+	// Check that there's actually a name after the prefix
+	if s == "User:" || s == "Group:" {
+		return fmt.Errorf("principal name cannot be empty (e.g., User:alice, User:*, Group:admins)")
+	}
+	// Validate that after "User:" or "Group:" there's at least one character
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+		return fmt.Errorf("principal name cannot be empty (e.g., User:alice, User:*, Group:admins)")
 	}
 	return nil
 }
@@ -290,12 +308,18 @@ func (m CreateACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Check if form is complete
 		if m.form.State == huh.StateCompleted {
-			// Form completed, create ACLs
-			m.creating = true
-			return m, tea.Batch(
-				m.spinner.Tick,
-				m.createACLs(),
-			)
+			// Check if user confirmed
+			if m.confirm {
+				// Form completed and confirmed, create ACLs
+				m.creating = true
+				return m, tea.Batch(
+					m.spinner.Tick,
+					m.createACLs(),
+				)
+			} else {
+				// User cancelled
+				return m, func() tea.Msg { return ViewChangedMsg{View: ACLsTab} }
+			}
 		}
 	}
 

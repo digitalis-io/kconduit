@@ -29,6 +29,7 @@ const (
 	DeleteTopicView
 	CreateACLView
 	EditACLView
+	DeleteACLView
 )
 
 type TabView int
@@ -63,6 +64,7 @@ type Model struct {
 	createTopicModel CreateTopicModel
 	createACLModel   CreateACLHuhModel
 	editACLModel     EditACLHuhModel
+	deleteACLModel   DeleteACLModel
 	editConfigModel  *EditConfigModel
 	aiAssistantModel AIAssistantModel
 	deleteTopicModel DeleteTopicModel
@@ -271,6 +273,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCreateACLView(msg)
 	case EditACLView:
 		return m.updateEditACLView(msg)
+	case DeleteACLView:
+		return m.updateDeleteACLView(msg)
 	default:
 		return m.updateListView(msg)
 	}
@@ -434,7 +438,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = AIAssistantView
 			return m, m.aiAssistantModel.Init()
 		case "D", "d":
-			// Delete topic - only available in Topics tab
+			// Delete topic or ACL depending on active tab
 			if m.activeTab == TopicsTab && len(m.topics) > 0 && !m.loading && m.err == nil {
 				selectedRow := m.topicsTable.SelectedRow()
 				if len(selectedRow) > 0 {
@@ -442,6 +446,24 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.deleteTopicModel = NewDeleteTopicModel(m.client, m.selectedTopic)
 					m.mode = DeleteTopicView
 					return m, m.deleteTopicModel.Init()
+				}
+			} else if m.activeTab == ACLsTab && len(m.acls) > 0 && !m.loading && m.err == nil {
+				// Delete ACL
+				selectedRow := m.aclTable.SelectedRow()
+				if len(selectedRow) >= 7 {
+					// Create ACL from selected row data - matching table column order
+					selectedACL := kafka.ACL{
+						Principal:      selectedRow[0], // Principal
+						ResourceType:   selectedRow[1], // Resource Type
+						ResourceName:   selectedRow[2], // Resource
+						PatternType:    selectedRow[3], // Pattern
+						Operation:      selectedRow[4], // Operation
+						PermissionType: selectedRow[5], // Permission
+						Host:           selectedRow[6], // Host
+					}
+					m.deleteACLModel = NewDeleteACLModel(m.client, selectedACL)
+					m.mode = DeleteACLView
+					return m, m.deleteACLModel.Init()
 				}
 			}
 		case "p", "P":
@@ -821,6 +843,25 @@ func (m Model) updateEditACLView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateDeleteACLView(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch msg := msg.(type) {
+	case ViewChangedMsg:
+		if msg.View == ACLsTab {
+			m.mode = ListView
+			m.activeTab = ACLsTab
+			m.loading = true
+			return m, fetchACLs(m.client)
+		}
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+	}
+	updatedModel, cmd := m.deleteACLModel.Update(msg)
+	m.deleteACLModel = updatedModel
+	return m, cmd
+}
+
 func (m Model) updateEditConfigView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
@@ -895,6 +936,8 @@ func (m Model) View() string {
 		return m.createACLModel.View()
 	case EditACLView:
 		return m.editACLModel.View()
+	case DeleteACLView:
+		return m.deleteACLModel.View()
 	case EditConfigView:
 		return m.editConfigModel.View()
 	case AIAssistantView:
@@ -1230,7 +1273,7 @@ func (m Model) getHelpText() string {
 		return baseHelp + " | Enter: Consume | P: Produce | C: Create Topic | D: Delete Topic"
 	case ACLsTab:
 		if len(m.acls) > 0 {
-			return baseHelp + " | C: Create ACL | e: Edit ACL"
+			return baseHelp + " | C: Create ACL | e: Edit ACL | D: Delete ACL"
 		}
 		return baseHelp + " | C: Create ACL"
 	default:
