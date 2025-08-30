@@ -13,9 +13,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-var baseStyle = lipgloss.NewStyle().
-	BorderStyle(lipgloss.NormalBorder()).
-	BorderForeground(lipgloss.Color("240"))
 
 type ViewMode int
 
@@ -289,7 +286,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(fetchTopics(m.client), fetchBrokers(m.client))
 
 	case tea.KeyMsg:
-		switch msg.String() {
+		switch s := msg.String(); s {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "tab":
@@ -392,9 +389,10 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, fetchTopics(m.client)
 		case "3":
 			// Switch to Consumer Groups tab
-			if m.activeTab == BrokersTab {
+			switch m.activeTab {
+			case BrokersTab:
 				m.brokersTable.Blur()
-			} else if m.activeTab == TopicsTab {
+			case TopicsTab:
 				m.topicsTable.Blur()
 				m.configTable.Blur()
 			}
@@ -403,9 +401,10 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, fetchConsumerGroups(m.client)
 		case "4":
 			// Switch to ACLs tab
-			if m.activeTab == BrokersTab {
+			switch m.activeTab {
+			case BrokersTab:
 				m.brokersTable.Blur()
-			} else if m.activeTab == TopicsTab {
+			case TopicsTab:
 				m.topicsTable.Blur()
 			}
 			m.activeTab = ACLsTab

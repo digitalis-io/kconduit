@@ -30,11 +30,11 @@ const (
 var (
 	focusedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 	blurredStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	cursorStyle  = focusedStyle.Copy()
+	cursorStyle  = focusedStyle
 	noStyle      = lipgloss.NewStyle()
 	helpStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 
-	focusedButton = focusedStyle.Copy().Render("[ Create ]")
+	focusedButton = focusedStyle.Render("[ Create ]")
 	blurredButton = fmt.Sprintf("[ %s ]", blurredStyle.Render("Create"))
 )
 

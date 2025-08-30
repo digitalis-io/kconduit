@@ -166,8 +166,8 @@ func (m DeleteTopicModel) View() string {
 		Padding(0, 2).
 		MarginRight(2)
 
-	yesStyle := buttonStyle.Copy()
-	noStyle := buttonStyle.Copy()
+	yesStyle := buttonStyle
+	noStyle := buttonStyle
 
 	// Style buttons based on focus and validation
 	validInput := m.confirmInput.Value() == m.topicToDelete
@@ -210,7 +210,7 @@ func (m DeleteTopicModel) View() string {
 	if validInput {
 		s.WriteString(yesStyle.Render("[ Delete ]"))
 	} else {
-		disabledStyle := buttonStyle.Copy().
+		disabledStyle := buttonStyle.
 			Foreground(lipgloss.Color("240"))
 		s.WriteString(disabledStyle.Render("[ Delete ]"))
 	}

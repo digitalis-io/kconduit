@@ -146,7 +146,7 @@ func (m *EditConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
+		switch s := msg.String(); s {
 		case "esc":
 			// Cancel editing and return to list view
 			return m, ReturnToListView
@@ -159,7 +159,8 @@ func (m *EditConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.form = f
 
 		// Check if form is complete or aborted
-		if m.form.State == huh.StateCompleted {
+		switch m.form.State {
+		case huh.StateCompleted:
 			// Log immediately when form is completed
 			log.WithFields(map[string]interface{}{
 				"topic":        m.topicName,
@@ -204,7 +205,7 @@ func (m *EditConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return SwitchToListViewMsg{}
 				}),
 			)
-		} else if m.form.State == huh.StateAborted {
+		case huh.StateAborted:
 			// User cancelled, return to list view
 			return m, ReturnToListView
 		}

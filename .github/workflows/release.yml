@@ -55,7 +55,7 @@ jobs:
           mkdir -p dist
           go build -ldflags="-s -w -X main.version=${{ github.event.inputs.version || github.ref_name }}" \
             -o dist/kconduit-${{ matrix.suffix }} \
-            ./cmd/kconduit
+            ./cmd/kconduit/main.go
 
       - name: Compress binary
         run: |
