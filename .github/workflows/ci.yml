@@ -77,7 +77,6 @@ jobs:
 
       - name: Build
         run: |
-          ls -l
           go build -o kconduit cmd/kconduit/main.go
 
       - name: Test binary
