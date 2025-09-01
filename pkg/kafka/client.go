@@ -25,11 +25,11 @@ type Client struct {
 
 // SASLConfig holds SASL authentication configuration
 type SASLConfig struct {
-	Enabled    bool
-	Mechanism  string // PLAIN, SCRAM-SHA-256, SCRAM-SHA-512
-	Username   string
-	Password   string
-	Protocol   string // SASL_PLAINTEXT or SASL_SSL
+	Enabled   bool
+	Mechanism string // PLAIN, SCRAM-SHA-256, SCRAM-SHA-512
+	Username  string
+	Password  string
+	Protocol  string // SASL_PLAINTEXT or SASL_SSL
 }
 
 func NewClient(brokers []string) (*Client, error) {
@@ -40,7 +40,7 @@ func NewClient(brokers []string) (*Client, error) {
 func NewClientWithAuth(brokers []string, saslConfig *SASLConfig) (*Client, error) {
 	log := logger.Get()
 	log.WithField("brokers", brokers).Debug("Creating new Kafka client")
-	
+
 	config := sarama.NewConfig()
 	config.Version = sarama.V2_8_0_0
 	config.Producer.Return.Successes = true
@@ -50,7 +50,7 @@ func NewClientWithAuth(brokers []string, saslConfig *SASLConfig) (*Client, error
 	config.Metadata.Retry.Max = 3
 	config.Metadata.Retry.Backoff = 250 * time.Millisecond
 	config.Metadata.Timeout = 10 * time.Second
-	
+
 	// Configure SASL if provided
 	if saslConfig != nil && saslConfig.Enabled {
 		log.WithFields(map[string]interface{}{
@@ -58,11 +58,11 @@ func NewClientWithAuth(brokers []string, saslConfig *SASLConfig) (*Client, error
 			"username":  saslConfig.Username,
 			"protocol":  saslConfig.Protocol,
 		}).Info("Configuring SASL authentication")
-		
+
 		config.Net.SASL.Enable = true
 		config.Net.SASL.User = saslConfig.Username
 		config.Net.SASL.Password = saslConfig.Password
-		
+
 		// Set SASL mechanism
 		switch strings.ToUpper(saslConfig.Mechanism) {
 		case "PLAIN":
@@ -74,7 +74,7 @@ func NewClientWithAuth(brokers []string, saslConfig *SASLConfig) (*Client, error
 		default:
 			return nil, fmt.Errorf("unsupported SASL mechanism: %s", saslConfig.Mechanism)
 		}
-		
+
 		// Set security protocol
 		if strings.ToUpper(saslConfig.Protocol) == "SASL_SSL" {
 			config.Net.TLS.Enable = true
@@ -89,7 +89,9 @@ func NewClientWithAuth(brokers []string, saslConfig *SASLConfig) (*Client, error
 
 	producer, err := sarama.NewSyncProducer(brokers, config)
 	if err != nil {
-		admin.Close()
+		if closeErr := admin.Close(); closeErr != nil {
+			log.WithError(closeErr).Warn("Failed to close admin client after producer creation failure")
+		}
 		log.WithError(err).WithField("brokers", brokers).Error("Failed to create producer")
 		return nil, fmt.Errorf("failed to create producer: %w", err)
 	}
@@ -186,7 +188,11 @@ func (c *Client) GetTopicConfig(topicName string) (*TopicConfig, error) {
 	// Get partition details
 	controller, err := c.admin.Controller()
 	if err == nil {
-		defer controller.Close()
+		defer func() {
+			if closeErr := controller.Close(); closeErr != nil {
+				logger.Get().WithError(closeErr).Warn("Failed to close controller")
+			}
+		}()
 
 		request := &sarama.MetadataRequest{
 			Topics: []string{topicName},
@@ -216,14 +222,18 @@ func (c *Client) GetTopicConfig(topicName string) (*TopicConfig, error) {
 
 func (c *Client) GetBrokers() ([]BrokerInfo, error) {
 	log := logger.Get()
-	
+
 	// Get the controller broker
 	controller, err := c.admin.Controller()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get controller: %w", err)
 	}
-	defer controller.Close()
-	
+	defer func() {
+		if err := controller.Close(); err != nil {
+			log.WithError(err).Warn("Failed to close controller connection")
+		}
+	}()
+
 	// Store the controller's ID - this is the actual active controller
 	controllerBrokerID := controller.ID()
 	log.WithField("controllerBrokerID", controllerBrokerID).Info("Active controller broker ID")
@@ -234,11 +244,11 @@ func (c *Client) GetBrokers() ([]BrokerInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get metadata: %w", err)
 	}
-	
+
 	log.WithFields(map[string]interface{}{
 		"metadata.ControllerID": metadata.ControllerID,
-		"controller.ID()": controllerBrokerID,
-		"brokerCount": len(metadata.Brokers),
+		"controller.ID()":       controllerBrokerID,
+		"brokerCount":           len(metadata.Brokers),
 	}).Info("Metadata retrieved from cluster")
 
 	var brokers []BrokerInfo
@@ -267,8 +277,8 @@ func (c *Client) GetBrokers() ([]BrokerInfo, error) {
 		if broker.ID() == controllerBrokerID || (metadata.ControllerID >= 0 && metadata.ControllerID == broker.ID()) {
 			info.IsController = true
 			log.WithFields(map[string]interface{}{
-				"brokerID": broker.ID(),
-				"controllerBrokerID": controllerBrokerID,
+				"brokerID":              broker.ID(),
+				"controllerBrokerID":    controllerBrokerID,
 				"metadata.ControllerID": metadata.ControllerID,
 			}).Info("Found active controller broker")
 		}
@@ -396,20 +406,20 @@ func (c *Client) CreateTopic(name string, numPartitions int32, replicationFactor
 
 func (c *Client) DeleteTopic(name string) error {
 	log := logger.Get()
-	
+
 	if name == "" {
 		return fmt.Errorf("topic name cannot be empty")
 	}
-	
+
 	log.WithField("topic", name).Info("Deleting topic")
-	
+
 	// Delete the topic
 	err := c.admin.DeleteTopic(name)
 	if err != nil {
 		log.WithField("topic", name).WithError(err).Error("Failed to delete topic")
 		return fmt.Errorf("failed to delete topic: %w", err)
 	}
-	
+
 	log.WithField("topic", name).Info("Successfully deleted topic")
 	return nil
 }
@@ -442,7 +452,9 @@ func (c *Client) ConsumeMessages(ctx context.Context, topic string, messageChan 
 
 	partitions, err := consumer.Partitions(topic)
 	if err != nil {
-		consumer.Close()
+		if closeErr := consumer.Close(); closeErr != nil {
+			logger.Get().WithError(closeErr).Warn("Failed to close consumer after partition error")
+		}
 		return fmt.Errorf("failed to get partitions: %w", err)
 	}
 
@@ -453,9 +465,13 @@ func (c *Client) ConsumeMessages(ctx context.Context, topic string, messageChan 
 		if err != nil {
 			// Close all previously opened partition consumers
 			for _, pcons := range partitionConsumers {
-				pcons.Close()
+				if closeErr := pcons.Close(); closeErr != nil {
+					logger.Get().WithError(closeErr).Warn("Failed to close partition consumer during cleanup")
+				}
 			}
-			consumer.Close()
+			if closeErr := consumer.Close(); closeErr != nil {
+				logger.Get().WithError(closeErr).Warn("Failed to close consumer after consume partition error")
+			}
 			return fmt.Errorf("failed to consume partition %d: %w", partition, err)
 		}
 		partitionConsumers = append(partitionConsumers, pc)
@@ -509,16 +525,20 @@ func (c *Client) ConsumeMessages(ctx context.Context, topic string, messageChan 
 
 	// Clean up all partition consumers
 	for _, pc := range partitionConsumers {
-		pc.Close()
+		if closeErr := pc.Close(); closeErr != nil {
+			logger.Get().WithError(closeErr).Warn("Failed to close partition consumer during cleanup")
+		}
 	}
-	consumer.Close()
+	if closeErr := consumer.Close(); closeErr != nil {
+		logger.Get().WithError(closeErr).Warn("Failed to close consumer during cleanup")
+	}
 
 	return nil
 }
 
 func (c *Client) UpdateTopicConfig(topicName string, configKey string, configValue string) error {
 	log := logger.Get()
-	
+
 	if topicName == "" || configKey == "" {
 		err := fmt.Errorf("topic name and config key cannot be empty")
 		log.WithError(err).Error("Invalid parameters for UpdateTopicConfig")
@@ -559,7 +579,7 @@ func (c *Client) UpdateTopicConfig(topicName string, configKey string, configVal
 
 func (c *Client) ModifyTopicPartitions(topicName string, numPartitions int32) error {
 	log := logger.Get()
-	
+
 	if topicName == "" {
 		err := fmt.Errorf("topic name cannot be empty")
 		log.WithError(err).Error("Invalid parameters for ModifyTopicPartitions")
@@ -590,7 +610,7 @@ func (c *Client) ModifyTopicPartitions(topicName string, numPartitions int32) er
 
 	currentPartitions := topicMeta.NumPartitions
 	if numPartitions <= currentPartitions {
-		return fmt.Errorf("new partition count (%d) must be greater than current count (%d)", 
+		return fmt.Errorf("new partition count (%d) must be greater than current count (%d)",
 			numPartitions, currentPartitions)
 	}
 
@@ -616,16 +636,16 @@ func (c *Client) ModifyTopicPartitions(topicName string, numPartitions int32) er
 
 func (c *Client) GetConsumerGroups() ([]ConsumerGroupInfo, error) {
 	log := logger.Get()
-	
+
 	// List all consumer groups
 	groups, err := c.admin.ListConsumerGroups()
 	if err != nil {
 		log.WithError(err).Error("Failed to list consumer groups")
 		return nil, fmt.Errorf("failed to list consumer groups: %w", err)
 	}
-	
+
 	var groupInfos []ConsumerGroupInfo
-	
+
 	for groupID := range groups {
 		// Get group description for detailed info
 		descriptions, err := c.admin.DescribeConsumerGroups([]string{groupID})
@@ -633,34 +653,35 @@ func (c *Client) GetConsumerGroups() ([]ConsumerGroupInfo, error) {
 			log.WithField("groupID", groupID).WithError(err).Warn("Failed to describe consumer group")
 			continue
 		}
-		
+
 		if len(descriptions) == 0 {
 			continue
 		}
-		
+
 		desc := descriptions[0]
-		
+
 		// Build consumer group info
 		info := ConsumerGroupInfo{
 			GroupID:    groupID,
 			State:      desc.State,
 			NumMembers: len(desc.Members),
 		}
-		
+
 		// Get coordinator info - coordinator is typically embedded in the description
 		info.Coordinator = "unknown"
-		
+
 		// Collect unique topics from member metadata
 		topicSet := make(map[string]struct{})
 		for _, member := range desc.Members {
 			// Parse member metadata to get topics
 			// Note: MemberMetadata contains the subscription info
 			if len(member.MemberMetadata) > 0 {
-				// In production, you'd parse the metadata properly
-				// For now we'll use a placeholder
+				// TODO: Parse member metadata to extract subscription details
+				// The metadata contains encoded consumer protocol information
+				logger.Get().WithField("member", member.MemberId).Debug("Member has metadata to be parsed")
 			}
 		}
-		
+
 		// For now, get topics another way - through ListConsumerGroupOffsets
 		offsets, err := c.admin.ListConsumerGroupOffsets(groupID, nil)
 		if err == nil && offsets != nil {
@@ -670,45 +691,49 @@ func (c *Client) GetConsumerGroups() ([]ConsumerGroupInfo, error) {
 			}
 		}
 		info.NumTopics = len(topicSet)
-		
+
 		// Calculate consumer lag (simplified - would need offset fetch for accurate lag)
 		info.ConsumerLag = c.calculateConsumerLag(groupID, info.Topics)
-		
+
 		// Collect member IDs
 		for _, member := range desc.Members {
 			info.Members = append(info.Members, member.MemberId)
 		}
-		
+
 		groupInfos = append(groupInfos, info)
 	}
-	
+
 	// Sort by group ID
 	sort.Slice(groupInfos, func(i, j int) bool {
 		return groupInfos[i].GroupID < groupInfos[j].GroupID
 	})
-	
+
 	return groupInfos, nil
 }
 
 func (c *Client) calculateConsumerLag(groupID string, topics []string) int64 {
 	log := logger.Get()
 	var totalLag int64
-	
+
 	// Get committed offsets for the consumer group
 	offsets, err := c.admin.ListConsumerGroupOffsets(groupID, nil)
 	if err != nil {
 		log.WithField("groupID", groupID).WithError(err).Debug("Failed to get consumer group offsets")
 		return 0
 	}
-	
+
 	// Create a consumer to get high water marks
 	consumer, err := sarama.NewConsumer(c.brokers, c.config)
 	if err != nil {
 		log.WithError(err).Debug("Failed to create consumer for lag calculation")
 		return 0
 	}
-	defer consumer.Close()
-	
+	defer func() {
+		if closeErr := consumer.Close(); closeErr != nil {
+			log.WithError(closeErr).Debug("Failed to close consumer during lag calculation")
+		}
+	}()
+
 	// Calculate lag for each topic/partition
 	for topic, partitionOffsets := range offsets.Blocks {
 		// Get partitions for this topic
@@ -717,7 +742,7 @@ func (c *Client) calculateConsumerLag(groupID string, topics []string) int64 {
 			log.WithField("topic", topic).WithError(err).Debug("Failed to get partitions")
 			continue
 		}
-		
+
 		for partitionID, block := range partitionOffsets {
 			// Check if this partition exists
 			partitionFound := false
@@ -727,22 +752,24 @@ func (c *Client) calculateConsumerLag(groupID string, topics []string) int64 {
 					break
 				}
 			}
-			
+
 			if !partitionFound {
 				continue
 			}
-			
+
 			// Get the partition consumer to fetch high water mark
 			pc, err := consumer.ConsumePartition(topic, partitionID, sarama.OffsetNewest)
 			if err != nil {
 				log.WithField("topic", topic).WithField("partition", partitionID).WithError(err).Debug("Failed to get partition consumer")
 				continue
 			}
-			
+
 			// Get high water mark
 			highWaterMark := pc.HighWaterMarkOffset()
-			pc.Close()
-			
+			if closeErr := pc.Close(); closeErr != nil {
+				log.WithField("topic", topic).WithField("partition", partitionID).WithError(closeErr).Debug("Failed to close partition consumer")
+			}
+
 			// Calculate lag for this partition
 			if highWaterMark > 0 && block.Offset >= 0 {
 				lag := highWaterMark - block.Offset
@@ -752,7 +779,7 @@ func (c *Client) calculateConsumerLag(groupID string, topics []string) int64 {
 			}
 		}
 	}
-	
+
 	return totalLag
 }
 
@@ -821,14 +848,14 @@ type Message struct {
 }
 
 type ConsumerGroupInfo struct {
-	GroupID       string
-	NumMembers    int
-	NumTopics     int
-	ConsumerLag   int64
-	Coordinator   string
-	State         string
-	Topics        []string
-	Members       []string
+	GroupID     string
+	NumMembers  int
+	NumTopics   int
+	ConsumerLag int64
+	Coordinator string
+	State       string
+	Topics      []string
+	Members     []string
 }
 
 // ACL represents a Kafka ACL entry
@@ -867,14 +894,15 @@ func (c *Client) ListACLs() ([]ACL, error) {
 		log.WithError(err).Error("Failed to describe ACLs")
 		return nil, fmt.Errorf("failed to describe ACLs: %w", err)
 	}
-	
+
 	log.WithField("count", len(result)).Debug("ACL resources found")
 
 	var acls []ACL
 	for _, resourceAcls := range result {
-		resourceType := getResourceTypeName(resourceAcls.Resource.ResourceType)
-		resourceName := resourceAcls.Resource.ResourceName
-		patternType := getPatternTypeName(resourceAcls.Resource.ResourcePatternType)
+		resource := resourceAcls.Resource
+		resourceType := getResourceTypeName(resource.ResourceType)
+		resourceName := resource.ResourceName
+		patternType := getPatternTypeName(resource.ResourcePatternType)
 
 		for _, acl := range resourceAcls.Acls {
 			acls = append(acls, ACL{
