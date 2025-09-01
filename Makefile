@@ -92,7 +92,8 @@ run-dev: build
     --sasl-protocol SASL_PLAINTEXT \
     --sasl-mechanism PLAIN \
     --sasl-username admin \
-    --sasl-password admin-secret
+    --sasl-password admin-secret \
+    --log-level debug --log-file /tmp/k.log
 
 run: build
 	@echo "$(GREEN)Running $(BINARY_NAME)...$(NC)"

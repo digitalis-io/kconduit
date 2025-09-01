@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 )
@@ -22,9 +23,9 @@ func main() {
 
 	flag.StringVar(&brokers, "brokers", "localhost:9092", "Comma-separated list of Kafka broker addresses")
 	flag.StringVar(&brokers, "b", "localhost:9092", "Comma-separated list of Kafka broker addresses (short)")
-	flag.StringVar(&topic, "topic", "my-topic", "Kafka topic to consume from")
+	flag.StringVar(&topic, "topic", "topic01", "Kafka topic to produce to")
 
-	// New SASL-related flags
+	// SASL-related flags
 	flag.BoolVar(&saslEnabled, "sasl", false, "Enable SASL authentication")
 	flag.StringVar(&saslMechanism, "sasl-mechanism", "PLAIN", "SASL mechanism (e.g., PLAIN, SCRAM-SHA-256, SCRAM-SHA-512)")
 	flag.StringVar(&saslUsername, "sasl-username", "", "SASL username")
@@ -33,14 +34,12 @@ func main() {
 
 	flag.Parse()
 
-	// Base consumer configuration
+	// Base producer configuration
 	config := &kafka.ConfigMap{
 		"bootstrap.servers": brokers,
-		"group.id":          "tests-group", // Consumer group ID
-		"auto.offset.reset": "earliest",    // Start reading from the beginning if no offset is saved
 	}
 
-	// If SASL is enabled, extend config
+	// Apply SASL settings if requested
 	if saslEnabled {
 		config.SetKey("security.protocol", securityProtocol)
 		config.SetKey("sasl.mechanisms", saslMechanism)
@@ -48,28 +47,30 @@ func main() {
 		config.SetKey("sasl.password", saslPassword)
 	}
 
-	// Create a new consumer instance
-	c, err := kafka.NewConsumer(config)
+	// Create a new producer instance
+	p, err := kafka.NewProducer(config)
 	if err != nil {
-		log.Fatalf("Failed to create consumer: %v", err)
+		log.Fatalf("Failed to create producer: %v", err)
 	}
-	defer func() {
-		if err := c.Close(); err != nil {
-			log.Printf("Error closing consumer: %v", err)
+	defer p.Close()
+
+	// Handle delivery reports
+	go func() {
+		for e := range p.Events() {
+			switch ev := e.(type) {
+			case *kafka.Message:
+				if ev.TopicPartition.Error != nil {
+					log.Printf("Delivery failed: %v\n", ev.TopicPartition.Error)
+				} else {
+					fmt.Printf("Delivered message to %v\n", ev.TopicPartition)
+				}
+			}
 		}
 	}()
 
-	// Subscribe to topic
-	err = c.SubscribeTopics([]string{topic}, nil)
-	if err != nil {
-		log.Fatalf("Failed to subscribe to topic: %v", err)
-	}
-
-	// Handle graceful shutdown
+	// Handle OS signals
 	sigchan := make(chan os.Signal, 1)
 	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
-
-	fmt.Printf("Consumer started on topic %s. Press Ctrl+C to exit.\n", topic)
 
 	run := true
 	for run {
@@ -78,20 +79,26 @@ func main() {
 			fmt.Printf("Caught signal %v: terminating\n", sig)
 			run = false
 		default:
-			ev := c.Poll(100)
-			if ev == nil {
-				continue
+			// Produce a message
+			value := fmt.Sprintf("Test message at %v", time.Now().Format(time.RFC3339))
+			err := p.Produce(&kafka.Message{
+				TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
+				Value:          []byte(value),
+			}, nil)
+
+			if err != nil {
+				log.Printf("Failed to produce message: %v", err)
+			} else {
+				fmt.Printf("Queued message for topic %s: %s\n", topic, value)
 			}
 
-			switch e := ev.(type) {
-			case *kafka.Message:
-				fmt.Printf("Received message from topic %s [%d] at offset %v: %s\n",
-					*e.TopicPartition.Topic, e.TopicPartition.Partition, e.TopicPartition.Offset, string(e.Value))
-			case kafka.Error:
-				log.Printf("Consumer error: %v (%v)\n", e.Code(), e.String())
-			}
+			time.Sleep(2 * time.Second)
 		}
 	}
 
-	fmt.Println("Consumer gracefully shut down.")
+	// Ensure all queued messages are delivered before shutdown
+	fmt.Println("Flushing pending messages...")
+	p.Flush(15 * 1000)
+
+	fmt.Println("Producer gracefully shut down.")
 }

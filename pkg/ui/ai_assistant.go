@@ -60,6 +60,29 @@ or
 or
 {"action": "query_topics", "filter": {"replication_factor": 3}}
 
+For ACL operations:
+
+To create an ACL, respond with JSON:
+{"action": "create_acl", "principal": "User:alice", "host": "*", "resource_type": "Topic", "resource_name": "my-topic", "pattern_type": "Literal", "operation": "Read", "permission_type": "Allow"}
+
+To create multiple ACLs at once:
+{"action": "create_acls", "acls": [{"principal": "User:alice", "host": "*", "resource_type": "Topic", "resource_name": "my-topic", "pattern_type": "Literal", "operation": "Read", "permission_type": "Allow"}, {"principal": "User:alice", "host": "*", "resource_type": "Topic", "resource_name": "my-topic", "pattern_type": "Literal", "operation": "Write", "permission_type": "Allow"}]}
+
+To delete an ACL, respond with JSON:
+{"action": "delete_acl", "principal": "User:alice", "host": "*", "resource_type": "Topic", "resource_name": "my-topic", "pattern_type": "Literal", "operation": "Read", "permission_type": "Allow"}
+
+To query/list ACLs, respond with JSON:
+{"action": "query_acls", "filter": {"principal": "User:alice"}}
+or
+{"action": "query_acls", "filter": {"resource_type": "Topic", "resource_name": "my-topic"}}
+or
+{"action": "query_acls", "filter": {}} (for all ACLs)
+
+Valid resource types: Topic, Group, Cluster, TransactionalId
+Valid operations: Read, Write, Create, Delete, Alter, Describe, ClusterAction, DescribeConfigs, AlterConfigs, IdempotentWrite, All
+Valid permission types: Allow, Deny
+Valid pattern types: Literal, Prefixed
+
 Always respond with ONLY the appropriate JSON for the requested operation. Do NOT include explanations, markdown formatting, or multiple JSON blocks. Return a single, clean JSON object that can be directly executed.
 
 If it requires multiple steps, ensure they are in the right order and all necessary fields are included.
@@ -93,7 +116,7 @@ type AIAssistantModel struct {
 
 func NewAIAssistantModel(client *kafka.Client, aiEngine string, aiModel string) AIAssistantModel {
 	ta := textarea.New()
-	ta.Placeholder = "Enter your Kafka command in natural language...\nExample: 'Create a topic named my-new-topic with 3 partitions and gzip compression'"
+	ta.Placeholder = "Enter your Kafka command in natural language...\nExamples: 'Create a topic named my-new-topic with 3 partitions' or 'Give user alice read access to topic events'"
 	ta.Focus()
 	ta.CharLimit = 500
 	ta.SetWidth(100)
@@ -897,6 +920,64 @@ func (m *AIAssistantModel) executeMultipleCommands(commands []map[string]interfa
 						}
 					}
 				}
+				
+			case "create_acl":
+				principal, _ := command["principal"].(string)
+				host, _ := command["host"].(string)
+				resourceType, _ := command["resource_type"].(string)
+				resourceName, _ := command["resource_name"].(string)
+				patternType, _ := command["pattern_type"].(string)
+				operation, _ := command["operation"].(string)
+				permissionType, _ := command["permission_type"].(string)
+				
+				if principal != "" && resourceType != "" && resourceName != "" {
+					acl := kafka.ACL{
+						Principal:      principal,
+						Host:           host,
+						ResourceType:   resourceType,
+						ResourceName:   resourceName,
+						PatternType:    patternType,
+						Operation:      operation,
+						PermissionType: permissionType,
+					}
+					
+					err = m.client.CreateACL(acl)
+					if err != nil {
+						result = fmt.Sprintf("❌ Failed to create ACL: %v", err)
+					} else {
+						result = fmt.Sprintf("✅ Created ACL: %s on %s %s (%s %s)", 
+							principal, resourceType, resourceName, operation, permissionType)
+					}
+				}
+				
+			case "delete_acl":
+				principal, _ := command["principal"].(string)
+				host, _ := command["host"].(string)
+				resourceType, _ := command["resource_type"].(string)
+				resourceName, _ := command["resource_name"].(string)
+				patternType, _ := command["pattern_type"].(string)
+				operation, _ := command["operation"].(string)
+				permissionType, _ := command["permission_type"].(string)
+				
+				if principal != "" && resourceType != "" && resourceName != "" {
+					acl := kafka.ACL{
+						Principal:      principal,
+						Host:           host,
+						ResourceType:   resourceType,
+						ResourceName:   resourceName,
+						PatternType:    patternType,
+						Operation:      operation,
+						PermissionType: permissionType,
+					}
+					
+					err = m.client.DeleteACL(acl)
+					if err != nil {
+						result = fmt.Sprintf("❌ Failed to delete ACL: %v", err)
+					} else {
+						result = fmt.Sprintf("✅ Deleted ACL: %s on %s %s (%s %s)", 
+							principal, resourceType, resourceName, operation, permissionType)
+					}
+				}
 			}
 			
 			if result != "" {
@@ -1380,6 +1461,212 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 					}
 				}
 				responseText.WriteString("\n")
+			}
+
+			return AIResponseMsg{
+				response: responseText.String(),
+				err:      nil,
+			}
+		}
+
+	case "create_acl":
+		principal, _ := command["principal"].(string)
+		host, _ := command["host"].(string)
+		resourceType, _ := command["resource_type"].(string)
+		resourceName, _ := command["resource_name"].(string)
+		patternType, _ := command["pattern_type"].(string)
+		operation, _ := command["operation"].(string)
+		permissionType, _ := command["permission_type"].(string)
+
+		if principal != "" && resourceType != "" && resourceName != "" {
+			return func() tea.Msg {
+				acl := kafka.ACL{
+					Principal:      principal,
+					Host:           host,
+					ResourceType:   resourceType,
+					ResourceName:   resourceName,
+					PatternType:    patternType,
+					Operation:      operation,
+					PermissionType: permissionType,
+				}
+
+				err := m.client.CreateACL(acl)
+				if err != nil {
+					return AIResponseMsg{
+						response: fmt.Sprintf("❌ Failed to create ACL: %v", err),
+						err:      err,
+					}
+				}
+
+				return AIResponseMsg{
+					response: fmt.Sprintf("✅ Successfully created ACL:\n• Principal: %s\n• Resource: %s %s\n• Operation: %s %s\n• Host: %s",
+						principal, resourceType, resourceName, operation, permissionType, host),
+					err: nil,
+				}
+			}
+		}
+
+	case "create_acls":
+		aclsData, _ := command["acls"].([]interface{})
+		
+		if len(aclsData) > 0 {
+			return func() tea.Msg {
+				var created []string
+				var errors []string
+
+				for _, aclData := range aclsData {
+					aclMap, ok := aclData.(map[string]interface{})
+					if !ok {
+						continue
+					}
+
+					acl := kafka.ACL{
+						Principal:      aclMap["principal"].(string),
+						Host:           aclMap["host"].(string),
+						ResourceType:   aclMap["resource_type"].(string),
+						ResourceName:   aclMap["resource_name"].(string),
+						PatternType:    aclMap["pattern_type"].(string),
+						Operation:      aclMap["operation"].(string),
+						PermissionType: aclMap["permission_type"].(string),
+					}
+
+					err := m.client.CreateACL(acl)
+					if err != nil {
+						errors = append(errors, fmt.Sprintf("%s %s: %v", acl.Operation, acl.PermissionType, err))
+					} else {
+						created = append(created, fmt.Sprintf("%s %s", acl.Operation, acl.PermissionType))
+					}
+				}
+
+				var responseText strings.Builder
+				if len(created) > 0 {
+					responseText.WriteString(fmt.Sprintf("✅ Successfully created %d ACL(s):\n", len(created)))
+					for _, c := range created {
+						responseText.WriteString(fmt.Sprintf("  • %s\n", c))
+					}
+				}
+				if len(errors) > 0 {
+					responseText.WriteString(fmt.Sprintf("\n❌ Failed to create %d ACL(s):\n", len(errors)))
+					for _, e := range errors {
+						responseText.WriteString(fmt.Sprintf("  • %s\n", e))
+					}
+				}
+
+				return AIResponseMsg{
+					response: responseText.String(),
+					err:      nil,
+				}
+			}
+		}
+
+	case "delete_acl":
+		principal, _ := command["principal"].(string)
+		host, _ := command["host"].(string)
+		resourceType, _ := command["resource_type"].(string)
+		resourceName, _ := command["resource_name"].(string)
+		patternType, _ := command["pattern_type"].(string)
+		operation, _ := command["operation"].(string)
+		permissionType, _ := command["permission_type"].(string)
+
+		if principal != "" && resourceType != "" && resourceName != "" {
+			return func() tea.Msg {
+				acl := kafka.ACL{
+					Principal:      principal,
+					Host:           host,
+					ResourceType:   resourceType,
+					ResourceName:   resourceName,
+					PatternType:    patternType,
+					Operation:      operation,
+					PermissionType: permissionType,
+				}
+
+				err := m.client.DeleteACL(acl)
+				if err != nil {
+					return AIResponseMsg{
+						response: fmt.Sprintf("❌ Failed to delete ACL: %v", err),
+						err:      err,
+					}
+				}
+
+				return AIResponseMsg{
+					response: fmt.Sprintf("✅ Successfully deleted ACL:\n• Principal: %s\n• Resource: %s %s\n• Operation: %s %s",
+						principal, resourceType, resourceName, operation, permissionType),
+					err: nil,
+				}
+			}
+		}
+
+	case "query_acls":
+		filter, _ := command["filter"].(map[string]interface{})
+
+		return func() tea.Msg {
+			// Get all ACLs
+			acls, err := m.client.ListACLs()
+			if err != nil {
+				return AIResponseMsg{
+					response: fmt.Sprintf("❌ Failed to fetch ACLs: %v", err),
+					err:      err,
+				}
+			}
+
+			// Filter ACLs based on criteria
+			var filteredACLs []kafka.ACL
+			for _, acl := range acls {
+				include := true
+
+				// Check filters
+				if principal, ok := filter["principal"].(string); ok && principal != "" {
+					if !strings.Contains(strings.ToLower(acl.Principal), strings.ToLower(principal)) {
+						include = false
+					}
+				}
+
+				if resourceType, ok := filter["resource_type"].(string); ok && resourceType != "" {
+					if !strings.EqualFold(acl.ResourceType, resourceType) {
+						include = false
+					}
+				}
+
+				if resourceName, ok := filter["resource_name"].(string); ok && resourceName != "" {
+					if !strings.Contains(strings.ToLower(acl.ResourceName), strings.ToLower(resourceName)) {
+						include = false
+					}
+				}
+
+				if operation, ok := filter["operation"].(string); ok && operation != "" {
+					if !strings.EqualFold(acl.Operation, operation) {
+						include = false
+					}
+				}
+
+				if include {
+					filteredACLs = append(filteredACLs, acl)
+				}
+			}
+
+			// Format response
+			var responseText strings.Builder
+			if len(filteredACLs) == 0 {
+				responseText.WriteString("No ACLs found matching the criteria.")
+			} else {
+				responseText.WriteString(fmt.Sprintf("Found %d ACL(s):\n\n", len(filteredACLs)))
+
+				// Group ACLs by resource for better readability
+				resourceMap := make(map[string][]kafka.ACL)
+				for _, acl := range filteredACLs {
+					key := fmt.Sprintf("%s:%s", acl.ResourceType, acl.ResourceName)
+					resourceMap[key] = append(resourceMap[key], acl)
+				}
+
+				for resource, aclList := range resourceMap {
+					parts := strings.Split(resource, ":")
+					responseText.WriteString(fmt.Sprintf("📋 %s: %s\n", parts[0], parts[1]))
+					for _, acl := range aclList {
+						responseText.WriteString(fmt.Sprintf("  • %s → %s %s (from %s)\n", 
+							acl.Principal, acl.Operation, acl.PermissionType, acl.Host))
+					}
+					responseText.WriteString("\n")
+				}
 			}
 
 			return AIResponseMsg{
