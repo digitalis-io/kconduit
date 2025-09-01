@@ -319,6 +319,63 @@ func (c *Client) GetBrokers() ([]BrokerInfo, error) {
 	return brokers, nil
 }
 
+// GetClusterStats retrieves cluster-wide partition and replication statistics
+func (c *Client) GetClusterStats() (*ClusterStats, error) {
+	log := logger.Get()
+	
+	// Get controller for metadata request
+	controller, err := c.admin.Controller()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get controller: %w", err)
+	}
+	defer func() {
+		if err := controller.Close(); err != nil {
+			log.WithError(err).Warn("Failed to close controller connection")
+		}
+	}()
+	
+	// Get metadata for all topics
+	request := &sarama.MetadataRequest{}
+	metadata, err := controller.GetMetadata(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get metadata: %w", err)
+	}
+	
+	stats := &ClusterStats{}
+	
+	// Iterate through all topics and their partitions
+	for _, topic := range metadata.Topics {
+		// Skip internal topics
+		if strings.HasPrefix(topic.Name, "__") {
+			continue
+		}
+		
+		for _, partition := range topic.Partitions {
+			stats.TotalPartitions++
+			stats.TotalReplicas += len(partition.Replicas)
+			
+			// Check if partition is under-replicated
+			if len(partition.Isr) < len(partition.Replicas) {
+				stats.UnderReplicatedPartitions++
+			}
+			
+			// Check if partition is offline (no leader)
+			if partition.Leader < 0 {
+				stats.OfflinePartitions++
+			}
+		}
+	}
+	
+	log.WithFields(map[string]interface{}{
+		"totalPartitions": stats.TotalPartitions,
+		"totalReplicas": stats.TotalReplicas,
+		"underReplicated": stats.UnderReplicatedPartitions,
+		"offline": stats.OfflinePartitions,
+	}).Debug("Cluster statistics retrieved")
+	
+	return stats, nil
+}
+
 func (c *Client) getKafkaVersion(apiKeys []sarama.ApiVersionsResponseKey) string {
 	// Determine Kafka version based on API versions
 	if len(apiKeys) == 0 {
@@ -536,6 +593,59 @@ func (c *Client) ConsumeMessages(ctx context.Context, topic string, messageChan 
 	return nil
 }
 
+// parseTimeToMilliseconds converts human-readable time formats to milliseconds
+// Supports formats like: "1h" (1 hour), "1d" (1 day), "30m" (30 minutes), "1w" (1 week)
+// Returns the original value if it's already a number or doesn't match time format
+func parseTimeToMilliseconds(value string) string {
+	// If it's already a pure number, return as-is
+	if _, err := strconv.ParseInt(value, 10, 64); err == nil {
+		return value
+	}
+	
+	// Try parsing as Go duration (handles h, m, s, ms, us, ns)
+	if duration, err := time.ParseDuration(value); err == nil {
+		milliseconds := duration.Milliseconds()
+		return strconv.FormatInt(milliseconds, 10)
+	}
+	
+	// Handle day and week formats manually
+	value = strings.TrimSpace(strings.ToLower(value))
+	
+	// Extract number and unit
+	var number float64
+	var unit string
+	
+	for i, r := range value {
+		if (r < '0' || r > '9') && r != '.' {
+			numberStr := value[:i]
+			unit = value[i:]
+			if n, err := strconv.ParseFloat(numberStr, 64); err == nil {
+				number = n
+			} else {
+				return value // Can't parse, return original
+			}
+			break
+		}
+	}
+	
+	if number == 0 {
+		return value // No valid number found
+	}
+	
+	// Convert based on unit
+	var milliseconds int64
+	switch strings.TrimSpace(unit) {
+	case "d", "day", "days":
+		milliseconds = int64(number * 24 * 60 * 60 * 1000)
+	case "w", "week", "weeks":
+		milliseconds = int64(number * 7 * 24 * 60 * 60 * 1000)
+	default:
+		return value // Unknown unit, return original
+	}
+	
+	return strconv.FormatInt(milliseconds, 10)
+}
+
 func (c *Client) UpdateTopicConfig(topicName string, configKey string, configValue string) error {
 	log := logger.Get()
 
@@ -543,6 +653,31 @@ func (c *Client) UpdateTopicConfig(topicName string, configKey string, configVal
 		err := fmt.Errorf("topic name and config key cannot be empty")
 		log.WithError(err).Error("Invalid parameters for UpdateTopicConfig")
 		return err
+	}
+	
+	// Convert human-readable time formats for time-based configs
+	timeBasedConfigs := map[string]bool{
+		"retention.ms":           true,
+		"segment.ms":            true,
+		"flush.ms":              true,
+		"delete.retention.ms":   true,
+		"file.delete.delay.ms":  true,
+		"log.roll.ms":           true,
+		"max.compaction.lag.ms": true,
+		"min.compaction.lag.ms": true,
+		"message.timestamp.difference.max.ms": true,
+	}
+	
+	originalValue := configValue
+	if timeBasedConfigs[configKey] {
+		configValue = parseTimeToMilliseconds(configValue)
+		if originalValue != configValue {
+			log.WithFields(map[string]interface{}{
+				"key":           configKey,
+				"originalValue": originalValue,
+				"convertedValue": configValue,
+			}).Info("Converted time format to milliseconds")
+		}
 	}
 
 	log.WithFields(map[string]interface{}{
@@ -856,6 +991,14 @@ type ConsumerGroupInfo struct {
 	State       string
 	Topics      []string
 	Members     []string
+}
+
+// ClusterStats represents cluster-wide statistics
+type ClusterStats struct {
+	TotalPartitions     int
+	TotalReplicas       int
+	UnderReplicatedPartitions int
+	OfflinePartitions   int
 }
 
 // ACL represents a Kafka ACL entry

@@ -103,9 +103,16 @@ func NewEditConfigModel(client *kafka.Client, topicName, configKey, currentValue
 
 	case isNumeric:
 		// Numeric fields use text input with validation
+		description := fmt.Sprintf("Current value: %s", currentValue)
+		
+		// Add help text for time-based fields
+		if strings.HasSuffix(configKey, ".ms") {
+			description += "\n💡 Tip: You can use formats like 1h, 1d, 7d, 1w (will convert to milliseconds)"
+		}
+		
 		input = huh.NewInput().
 			Title(fmt.Sprintf("Edit %s", configKey)).
-			Description(fmt.Sprintf("Current value: %s", currentValue)).
+			Description(description).
 			Placeholder(currentValue).
 			Value(&model.newValue).
 			Validate(func(s string) error {

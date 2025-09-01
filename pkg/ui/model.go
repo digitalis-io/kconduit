@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-
 type ViewMode int
 
 const (
@@ -50,6 +49,7 @@ type Model struct {
 	consumerGroups   []kafka.ConsumerGroupInfo
 	acls             []kafka.ACL
 	topicConfig      *kafka.TopicConfig
+	clusterStats     *kafka.ClusterStats
 	err              error
 	loading          bool
 	loadingConfig    bool
@@ -191,6 +191,11 @@ type brokersMsg struct {
 	err     error
 }
 
+type clusterStatsMsg struct {
+	stats *kafka.ClusterStats
+	err   error
+}
+
 type consumerGroupsMsg struct {
 	groups []kafka.ConsumerGroupInfo
 	err    error
@@ -221,6 +226,13 @@ func fetchBrokers(client *kafka.Client) tea.Cmd {
 	return func() tea.Msg {
 		brokers, err := client.GetBrokers()
 		return brokersMsg{brokers: brokers, err: err}
+	}
+}
+
+func fetchClusterStats(client *kafka.Client) tea.Cmd {
+	return func() tea.Msg {
+		stats, err := client.GetClusterStats()
+		return clusterStatsMsg{stats: stats, err: err}
 	}
 }
 
@@ -606,6 +618,14 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.brokersTable.SetRows(rows)
+		// Also fetch cluster stats when brokers are loaded
+		return m, fetchClusterStats(m.client)
+
+	case clusterStatsMsg:
+		if msg.err == nil {
+			m.clusterStats = msg.stats
+		}
+		// Don't set error here as it's not critical
 
 	case consumerGroupsMsg:
 		m.loading = false
@@ -633,7 +653,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.consumersTable.SetRows(rows)
-		
+
 	case aclsMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -642,7 +662,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.acls = msg.acls
 		m.err = nil
-		
+
 		// Create ACL table if not already created
 		if m.aclTable == nil {
 			aclColumns := []table.Column{
@@ -659,7 +679,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 				table.WithFocused(true),
 				table.WithHeight(10),
 			)
-			
+
 			s := table.DefaultStyles()
 			s.Header = s.Header.
 				BorderStyle(lipgloss.NormalBorder()).
@@ -673,7 +693,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.SetStyles(s)
 			m.aclTable = &t
 		}
-		
+
 		rows := make([]table.Row, len(m.acls))
 		for i, acl := range m.acls {
 			rows[i] = table.Row{
@@ -1034,7 +1054,154 @@ func (m Model) renderBrokersView() string {
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240"))
 
-	return borderStyle.Render(m.brokersTable.View())
+	// Calculate broker statistics
+	totalBrokers := len(m.brokers)
+	offlineBrokers := 0
+	controllerCount := 0
+
+	for _, broker := range m.brokers {
+		if broker.Status != "Online" {
+			offlineBrokers++
+		}
+		if broker.IsController {
+			controllerCount++
+		}
+	}
+
+	// Left panel: brokers table (70% width)
+	leftPanelWidth := int(float64(m.width-10) * 0.7)
+	leftPanel := borderStyle.
+		Width(leftPanelWidth).
+		Height(m.height - 12)
+
+	brokersTableView := leftPanel.Render(m.brokersTable.View())
+
+	// Right panel: broker info box (30% width)
+	rightPanelWidth := m.width - leftPanelWidth - 10
+
+	// Info box styling
+	infoBoxStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("205")).
+		Padding(1, 2).
+		Width(rightPanelWidth).
+		Height(m.height - 10)
+
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("205")).
+		MarginBottom(1)
+
+	labelStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("246"))
+
+	valueStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("229"))
+
+	errorStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("196"))
+
+	successStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("46"))
+
+	// Build info content
+	var infoContent strings.Builder
+
+	infoContent.WriteString(titleStyle.Render("📊 Cluster Status"))
+	infoContent.WriteString("\n\n")
+
+	// Broker count
+	infoContent.WriteString(labelStyle.Render("Total Brokers: "))
+	infoContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", totalBrokers)))
+	infoContent.WriteString("\n\n")
+
+	// Online/Offline status
+	infoContent.WriteString(labelStyle.Render("Status: "))
+	if offlineBrokers == 0 {
+		infoContent.WriteString(successStyle.Render(fmt.Sprintf("✅ All Online (%d)", totalBrokers)))
+	} else {
+		onlineBrokers := totalBrokers - offlineBrokers
+		infoContent.WriteString("\n")
+		infoContent.WriteString(labelStyle.Render("  Online: "))
+		infoContent.WriteString(successStyle.Render(fmt.Sprintf("%d", onlineBrokers)))
+		infoContent.WriteString("\n")
+		infoContent.WriteString(labelStyle.Render("  Offline: "))
+		infoContent.WriteString(errorStyle.Render(fmt.Sprintf("%d", offlineBrokers)))
+	}
+	infoContent.WriteString("\n\n")
+
+	// Controller info
+	infoContent.WriteString(labelStyle.Render("Controller: "))
+	if controllerCount > 0 {
+		for _, broker := range m.brokers {
+			if broker.IsController {
+				infoContent.WriteString(valueStyle.Render(fmt.Sprintf("Node %d", broker.ID)))
+				break
+			}
+		}
+	} else {
+		infoContent.WriteString(labelStyle.Render("None detected"))
+	}
+	infoContent.WriteString("\n\n")
+
+	// Replica Status
+	infoContent.WriteString(titleStyle.Render("📈 Replica Status"))
+	infoContent.WriteString("\n\n")
+
+	// Use actual cluster stats if available
+	if m.clusterStats != nil {
+		infoContent.WriteString(labelStyle.Render("Total Partitions: "))
+		infoContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", m.clusterStats.TotalPartitions)))
+		infoContent.WriteString("\n\n")
+
+		infoContent.WriteString(labelStyle.Render("Total Replicas: "))
+		infoContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", m.clusterStats.TotalReplicas)))
+		infoContent.WriteString("\n\n")
+
+		infoContent.WriteString(labelStyle.Render("Under-Replicated: "))
+		if m.clusterStats.UnderReplicatedPartitions == 0 {
+			infoContent.WriteString(successStyle.Render("✅ None"))
+		} else {
+			infoContent.WriteString(errorStyle.Render(fmt.Sprintf("⚠️  %d partitions", m.clusterStats.UnderReplicatedPartitions)))
+		}
+
+		if m.clusterStats.OfflinePartitions > 0 {
+			infoContent.WriteString("\n\n")
+			infoContent.WriteString(labelStyle.Render("Offline Partitions: "))
+			infoContent.WriteString(errorStyle.Render(fmt.Sprintf("❌ %d", m.clusterStats.OfflinePartitions)))
+		}
+	} else {
+		// Fallback to basic calculation from topics
+		totalPartitions := 0
+		totalReplicas := 0
+
+		for _, topic := range m.topics {
+			totalPartitions += topic.Partitions
+			totalReplicas += topic.Partitions * topic.ReplicationFactor
+		}
+
+		infoContent.WriteString(labelStyle.Render("Total Partitions: "))
+		infoContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", totalPartitions)))
+		infoContent.WriteString("\n\n")
+
+		infoContent.WriteString(labelStyle.Render("Total Replicas: "))
+		infoContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", totalReplicas)))
+		infoContent.WriteString("\n")
+		infoContent.WriteString(labelStyle.Render("(Fetching detailed stats...)"))
+	}
+
+	infoBoxView := infoBoxStyle.Render(infoContent.String())
+
+	// Join left and right panels
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		brokersTableView,
+		"  ", // spacing
+		infoBoxView,
+	)
 }
 
 func (m Model) renderTopicsView() string {
@@ -1224,15 +1391,15 @@ func (m Model) renderConsumerGroupsView() string {
 
 func (m Model) renderACLsView() string {
 	var sb strings.Builder
-	
+
 	// Title with icon
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("205"))
-	
+
 	sb.WriteString(titleStyle.Render("🔐 Access Control Lists (ACLs)"))
 	sb.WriteString("\n\n")
-	
+
 	// Render ACL table
 	if m.aclTable != nil {
 		if len(m.acls) == 0 {
@@ -1246,7 +1413,7 @@ func (m Model) renderACLsView() string {
 	} else {
 		sb.WriteString("Loading ACLs...")
 	}
-	
+
 	// Error display
 	if m.err != nil {
 		errorStyle := lipgloss.NewStyle().
@@ -1254,7 +1421,7 @@ func (m Model) renderACLsView() string {
 			MarginTop(1)
 		sb.WriteString("\n\n" + errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
 	}
-	
+
 	return sb.String()
 }
 
