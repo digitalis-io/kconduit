@@ -61,3 +61,7 @@ __debug_bin
 # Configuration files with secrets (optional - uncomment if needed)
 # config/secrets.yaml
 # *.secret
+#
+*.jks
+jks_credentials.txt
+kafka.server.cer

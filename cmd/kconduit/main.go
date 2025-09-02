@@ -25,6 +25,11 @@ var (
 	cfgSaslUsername  string
 	cfgSaslPassword  string
 	cfgSaslProtocol  string
+	cfgTlsEnabled    bool
+	cfgTlsCACert     string
+	cfgTlsClientCert string
+	cfgTlsClientKey  string
+	cfgTlsSkipVerify bool
 )
 
 // These variables are set via ldflags during build
@@ -60,6 +65,11 @@ func main() {
 			saslUsername := viper.GetString("sasl_username")
 			saslPassword := viper.GetString("sasl_password")
 			saslProtocol := viper.GetString("sasl_protocol")
+			tlsEnabled := viper.GetBool("tls_enabled")
+			tlsCACert := viper.GetString("tls_ca_cert")
+			tlsClientCert := viper.GetString("tls_client_cert")
+			tlsClientKey := viper.GetString("tls_client_key")
+			tlsSkipVerify := viper.GetBool("tls_skip_verify")
 			// Version flag is handled before RunE, so this code path won't be reached
 			// when --version is used
 
@@ -86,8 +96,20 @@ func main() {
 				}
 			}
 
-			// Kafka client with optional SASL authentication
-			client, err := kafka.NewClientWithAuth(brokerList, saslConfig)
+			// Create TLS config if SSL is enabled or SASL_SSL is used
+			var tlsConfig *kafka.TLSConfig
+			if tlsEnabled || (saslConfig != nil && saslProtocol == "SASL_SSL") {
+				tlsConfig = &kafka.TLSConfig{
+					Enabled:            true,
+					CACert:             tlsCACert,
+					ClientCert:         tlsClientCert,
+					ClientKey:          tlsClientKey,
+					InsecureSkipVerify: tlsSkipVerify,
+				}
+			}
+
+			// Kafka client with optional SASL authentication and TLS
+			client, err := kafka.NewClientWithAuth(brokerList, saslConfig, tlsConfig)
 			if err != nil {
 				return fmt.Errorf("failed to connect to Kafka: %v", err)
 			}
@@ -122,6 +144,13 @@ func main() {
 	rootCmd.Flags().StringVar(&cfgSaslPassword, "sasl-password", "", "SASL password")
 	rootCmd.Flags().StringVar(&cfgSaslProtocol, "sasl-protocol", "SASL_PLAINTEXT", "Security protocol (SASL_PLAINTEXT, SASL_SSL)")
 
+	// TLS/SSL flags
+	rootCmd.Flags().BoolVar(&cfgTlsEnabled, "tls", false, "Enable TLS/SSL")
+	rootCmd.Flags().StringVar(&cfgTlsCACert, "tls-ca-cert", "", "Path to CA certificate file")
+	rootCmd.Flags().StringVar(&cfgTlsClientCert, "tls-client-cert", "", "Path to client certificate file")
+	rootCmd.Flags().StringVar(&cfgTlsClientKey, "tls-client-key", "", "Path to client key file")
+	rootCmd.Flags().BoolVar(&cfgTlsSkipVerify, "tls-skip-verify", false, "Skip TLS certificate verification (insecure)")
+
 	// Version flag
 	rootCmd.Flags().BoolP("version", "v", false, "Print version information and exit")
 
@@ -136,6 +165,11 @@ func main() {
 	_ = viper.BindPFlag("sasl_username", rootCmd.Flags().Lookup("sasl-username"))
 	_ = viper.BindPFlag("sasl_password", rootCmd.Flags().Lookup("sasl-password"))
 	_ = viper.BindPFlag("sasl_protocol", rootCmd.Flags().Lookup("sasl-protocol"))
+	_ = viper.BindPFlag("tls_enabled", rootCmd.Flags().Lookup("tls"))
+	_ = viper.BindPFlag("tls_ca_cert", rootCmd.Flags().Lookup("tls-ca-cert"))
+	_ = viper.BindPFlag("tls_client_cert", rootCmd.Flags().Lookup("tls-client-cert"))
+	_ = viper.BindPFlag("tls_client_key", rootCmd.Flags().Lookup("tls-client-key"))
+	_ = viper.BindPFlag("tls_skip_verify", rootCmd.Flags().Lookup("tls-skip-verify"))
 	_ = viper.BindPFlag("version", rootCmd.Flags().Lookup("version"))
 
 	// Environment variable support

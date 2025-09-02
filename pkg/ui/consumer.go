@@ -29,13 +29,6 @@ type ConsumerModel struct {
 	totalBytes   int64
 }
 
-var (
-	titleStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
-		Padding(0, 1)
-)
 
 func NewConsumerModel(topic string, client *kafka.Client) ConsumerModel {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -303,7 +296,7 @@ func (m ConsumerModel) View() string {
 	tableContent.WriteString(valueStyle.Render(fmt.Sprintf(" %d", len(m.messages))) + "\n")
 	
 	tableContent.WriteString(labelStyle.Render("Total Bytes:      "))
-	tableContent.WriteString(valueStyle.Render(fmt.Sprintf("%s", formatBytes(m.totalBytes))) + "\n")
+	tableContent.WriteString(valueStyle.Render(formatBytes(m.totalBytes)) + "\n")
 	
 	tableContent.WriteString(labelStyle.Render("Status:           "))
 	if m.err != nil {

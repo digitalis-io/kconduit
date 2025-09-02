@@ -67,13 +67,36 @@ make build
   --sasl-username alice \
   --sasl-password alice-secret
 
-# Connect with SASL over SSL
+# Connect with SASL over SSL (using default system certificates)
 ./kconduit -b broker:9093 \
   --sasl \
   --sasl-mechanism PLAIN \
   --sasl-username admin \
   --sasl-password admin-secret \
   --sasl-protocol SASL_SSL
+
+# Connect with SASL_SSL and custom certificates
+./kconduit -b broker:9093 \
+  --sasl \
+  --sasl-mechanism PLAIN \
+  --sasl-username admin \
+  --sasl-password admin-secret \
+  --sasl-protocol SASL_SSL \
+  --tls-ca-cert /path/to/ca-cert.pem \
+  --tls-client-cert /path/to/client-cert.pem \
+  --tls-client-key /path/to/client-key.pem
+
+# Connect with SSL/TLS only (no SASL)
+./kconduit -b broker:9093 \
+  --tls \
+  --tls-ca-cert /path/to/ca-cert.pem \
+  --tls-client-cert /path/to/client-cert.pem \
+  --tls-client-key /path/to/client-key.pem
+
+# Connect with SSL/TLS and skip certificate verification (insecure, for testing only)
+./kconduit -b broker:9093 \
+  --tls \
+  --tls-skip-verify
 ```
 
 ### AI Assistant Configuration
@@ -187,6 +210,11 @@ ollama serve  # In another terminal
 | `KCONDUIT_SASL_USERNAME` | SASL username | - |
 | `KCONDUIT_SASL_PASSWORD` | SASL password | - |
 | `KCONDUIT_SASL_PROTOCOL` | Security protocol | SASL_PLAINTEXT |
+| `KCONDUIT_TLS_ENABLED` | Enable TLS/SSL | false |
+| `KCONDUIT_TLS_CA_CERT` | Path to CA certificate file | - |
+| `KCONDUIT_TLS_CLIENT_CERT` | Path to client certificate file | - |
+| `KCONDUIT_TLS_CLIENT_KEY` | Path to client key file | - |
+| `KCONDUIT_TLS_SKIP_VERIFY` | Skip TLS certificate verification | false |
 | `OPENAI_API_KEY` | OpenAI API key for AI assistant | - |
 | `OPENAI_MODEL` | OpenAI model to use | gpt-3.5-turbo |
 | `GEMINI_API_KEY` | Google Gemini API key | - |
@@ -210,6 +238,11 @@ ollama serve  # In another terminal
 | `--sasl-username` | SASL username | - |
 | `--sasl-password` | SASL password | - |
 | `--sasl-protocol` | Security protocol (SASL_PLAINTEXT, SASL_SSL) | SASL_PLAINTEXT |
+| `--tls` | Enable TLS/SSL | false |
+| `--tls-ca-cert` | Path to CA certificate file | - |
+| `--tls-client-cert` | Path to client certificate file | - |
+| `--tls-client-key` | Path to client key file | - |
+| `--tls-skip-verify` | Skip TLS certificate verification (insecure) | false |
 
 ## 🏗️ Building & Development
 

@@ -73,14 +73,17 @@ services:
     container_name: broker-1
     ports:
       - "29092:9092"
+      - "29094:9094"
+    command: ["sleep", "infinity"]
     environment:
       KAFKA_NODE_ID: 4
+      CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
       KAFKA_PROCESS_ROLES: broker
-      KAFKA_LISTENERS: 'BROKER://:19092,BROKER_HOST://:9092,INTERNAL://:9094'
-      KAFKA_ADVERTISED_LISTENERS: 'BROKER://broker-1:19092,BROKER_HOST://localhost:29092,INTERNAL://broker-1:9094'
+      KAFKA_LISTENERS: 'BROKER://:19092,BROKER_HOST://:9092,BROKER_HOST_SSL://:9094'
+      KAFKA_ADVERTISED_LISTENERS: 'BROKER://broker-1:19092,BROKER_HOST://localhost:29092,BROKER_HOST_SSL://broker-1:9094'
       KAFKA_INTER_BROKER_LISTENER_NAME: BROKER
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:SASL_PLAINTEXT,SASL:SASL_PLAINTEXT,BROKER_HOST:SASL_PLAINTEXT,BROKER:PLAINTEXT,INTERNAL:SASL_PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:SASL_PLAINTEXT,SASL:SASL_PLAINTEXT,BROKER_HOST:SASL_PLAINTEXT,BROKER:PLAINTEXT,BROKER_HOST_SSL:SASL_PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@controller-1:9093,2@controller-2:9093,3@controller-3:9093
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       # ACLs config
@@ -90,10 +93,18 @@ services:
       KAFKA_SASL_MECHANISM_CONTROLLER_PROTOCOL: PLAIN
       KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
       KAFKA_OPTS: -Djava.security.auth.login.config=/opt/kafka/config/kafka_server_jaas.conf
-
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      # SSL/SASL config for external listener
+      KAFKA_SSL_KEYSTORE_FILENAME: kafka.server.keystore.jks
+      KAFKA_SSL_KEY_CREDENTIALS: jks_credentials.txt
+      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka.server.truststore.jks
+      KAFKA_SSL_KEYSTORE_CREDENTIALS: jks_credentials.txt
     volumes:
       - ./kafka_jaas.conf:/opt/kafka/config/kafka_server_jaas.conf
       - ./client.properties:/opt/kafka/config/client.properties
+      - ./kafka.server.keystore.jks:/etc/kafka/secrets/kafka.server.keystore.jks
+      - ./kafka.server.truststore.jks:/etc/kafka/secrets/kafka.server.truststore.jks
+      - ./jks_credentials.txt:/etc/kafka/secrets/jks_credentials.txt
     depends_on:
       - controller-1
       - controller-2
@@ -109,14 +120,16 @@ services:
     container_name: broker-2
     ports:
       - 39092:9092
+      - 39094:9094
     environment:
       KAFKA_NODE_ID: 5
+      CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
       KAFKA_PROCESS_ROLES: broker
-      KAFKA_LISTENERS: 'BROKER://:19092,BROKER_HOST://:9092,INTERNAL://:9094'
-      KAFKA_ADVERTISED_LISTENERS: 'BROKER://broker-2:19092,BROKER_HOST://localhost:39092,INTERNAL://broker-2:9094'
+      KAFKA_LISTENERS: 'BROKER://:19092,BROKER_HOST://:9092,BROKER_HOST_SSL://:9094'
+      KAFKA_ADVERTISED_LISTENERS: 'BROKER://broker-2:19092,BROKER_HOST://localhost:39092,BROKER_HOST_SSL://broker-2:9094'
       KAFKA_INTER_BROKER_LISTENER_NAME: BROKER
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:SASL_PLAINTEXT,SASL:SASL_PLAINTEXT,BROKER_HOST:SASL_PLAINTEXT,BROKER:PLAINTEXT,INTERNAL:SASL_PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:SASL_PLAINTEXT,SASL:SASL_PLAINTEXT,BROKER_HOST:SASL_PLAINTEXT,BROKER:PLAINTEXT,BROKER_HOST_SSL:SASL_PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@controller-1:9093,2@controller-2:9093,3@controller-3:9093
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       # ACLs config
@@ -126,10 +139,18 @@ services:
       KAFKA_SASL_MECHANISM_CONTROLLER_PROTOCOL: PLAIN
       KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
       KAFKA_OPTS: -Djava.security.auth.login.config=/opt/kafka/config/kafka_server_jaas.conf
-
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      # SSL/SASL config for external listener
+      KAFKA_SSL_KEYSTORE_FILENAME: kafka.server.keystore.jks
+      KAFKA_SSL_KEY_CREDENTIALS: jks_credentials.txt
+      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka.server.truststore.jks
+      KAFKA_SSL_KEYSTORE_CREDENTIALS: jks_credentials.txt
     volumes:
       - ./kafka_jaas.conf:/opt/kafka/config/kafka_server_jaas.conf
       - ./client.properties:/opt/kafka/config/client.properties
+      - ./kafka.server.keystore.jks:/etc/kafka/secrets/kafka.server.keystore.jks
+      - ./kafka.server.truststore.jks:/etc/kafka/secrets/kafka.server.truststore.jks
+      - ./jks_credentials.txt:/etc/kafka/secrets/jks_credentials.txt
     depends_on:
       - controller-1
       - controller-2
@@ -145,14 +166,16 @@ services:
     container_name: broker-3
     ports:
       - 49092:9092
+      - 49094:9094
     environment:
       KAFKA_NODE_ID: 6
+      CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
       KAFKA_PROCESS_ROLES: broker
-      KAFKA_LISTENERS: 'BROKER://:19092,BROKER_HOST://:9092,INTERNAL://:9094'
-      KAFKA_ADVERTISED_LISTENERS: 'BROKER://broker-3:19092,BROKER_HOST://localhost:49092,INTERNAL://broker-3:9094'
+      KAFKA_LISTENERS: 'BROKER://:19092,BROKER_HOST://:9092,BROKER_HOST_SSL://:9094'
+      KAFKA_ADVERTISED_LISTENERS: 'BROKER://broker-3:19092,BROKER_HOST://localhost:49092,BROKER_HOST_SSL://broker-3:9094'
       KAFKA_INTER_BROKER_LISTENER_NAME: BROKER
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:SASL_PLAINTEXT,SASL:SASL_PLAINTEXT,BROKER_HOST:SASL_PLAINTEXT,BROKER:PLAINTEXT,INTERNAL:SASL_PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:SASL_PLAINTEXT,SASL:SASL_PLAINTEXT,BROKER_HOST:SASL_PLAINTEXT,BROKER:PLAINTEXT,BROKER_HOST_SSL:SASL_PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@controller-1:9093,2@controller-2:9093,3@controller-3:9093
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       # ACLs config
@@ -162,10 +185,18 @@ services:
       KAFKA_SASL_MECHANISM_CONTROLLER_PROTOCOL: PLAIN
       KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
       KAFKA_OPTS: -Djava.security.auth.login.config=/opt/kafka/config/kafka_server_jaas.conf
-
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      # SSL/SASL config for external listener
+      KAFKA_SSL_KEYSTORE_FILENAME: kafka.server.keystore.jks
+      KAFKA_SSL_KEY_CREDENTIALS: jks_credentials.txt
+      KAFKA_SSL_TRUSTSTORE_FILENAME: kafka.server.truststore.jks
+      KAFKA_SSL_KEYSTORE_CREDENTIALS: jks_credentials.txt
     volumes:
       - ./kafka_jaas.conf:/opt/kafka/config/kafka_server_jaas.conf
       - ./client.properties:/opt/kafka/config/client.properties
+      - ./kafka.server.keystore.jks:/etc/kafka/secrets/kafka.server.keystore.jks
+      - ./kafka.server.truststore.jks:/etc/kafka/secrets/kafka.server.truststore.jks
+      - ./jks_credentials.txt:/etc/kafka/secrets/jks_credentials.txt
     depends_on:
       - controller-1
       - controller-2

@@ -2,7 +2,10 @@ package kafka
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,12 +35,21 @@ type SASLConfig struct {
 	Protocol  string // SASL_PLAINTEXT or SASL_SSL
 }
 
+// TLSConfig holds TLS/SSL configuration
+type TLSConfig struct {
+	Enabled            bool
+	CACert             string // Path to CA certificate file
+	ClientCert         string // Path to client certificate file
+	ClientKey          string // Path to client key file
+	InsecureSkipVerify bool   // Skip server certificate verification
+}
+
 func NewClient(brokers []string) (*Client, error) {
-	return NewClientWithAuth(brokers, nil)
+	return NewClientWithAuth(brokers, nil, nil)
 }
 
 // NewClientWithAuth creates a new Kafka client with optional SASL authentication
-func NewClientWithAuth(brokers []string, saslConfig *SASLConfig) (*Client, error) {
+func NewClientWithAuth(brokers []string, saslConfig *SASLConfig, tlsConfig *TLSConfig) (*Client, error) {
 	log := logger.Get()
 	log.WithField("brokers", brokers).Debug("Creating new Kafka client")
 
@@ -78,7 +90,58 @@ func NewClientWithAuth(brokers []string, saslConfig *SASLConfig) (*Client, error
 		// Set security protocol
 		if strings.ToUpper(saslConfig.Protocol) == "SASL_SSL" {
 			config.Net.TLS.Enable = true
+			// If TLS config is not provided separately, use default TLS
+			if tlsConfig == nil {
+				log.Info("SASL_SSL enabled with default TLS configuration")
+			}
 		}
+	}
+
+	// Configure TLS/SSL if provided or if SASL_SSL is enabled
+	if tlsConfig != nil && tlsConfig.Enabled || (saslConfig != nil && strings.ToUpper(saslConfig.Protocol) == "SASL_SSL") {
+		log.Info("Configuring TLS/SSL")
+		config.Net.TLS.Enable = true
+		
+		// Create TLS configuration
+		tlsConf := &tls.Config{
+			InsecureSkipVerify: false,
+		}
+		
+		// Apply provided TLS config if available
+		if tlsConfig != nil {
+			tlsConf.InsecureSkipVerify = tlsConfig.InsecureSkipVerify
+			
+			// Load CA certificate if provided
+			if tlsConfig.CACert != "" {
+				log.WithField("ca_cert", tlsConfig.CACert).Debug("Loading CA certificate")
+				caCert, err := os.ReadFile(tlsConfig.CACert)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+				}
+				
+				caCertPool := x509.NewCertPool()
+				if !caCertPool.AppendCertsFromPEM(caCert) {
+					return nil, fmt.Errorf("failed to parse CA certificate")
+				}
+				tlsConf.RootCAs = caCertPool
+			}
+			
+			// Load client certificate and key if provided
+			if tlsConfig.ClientCert != "" && tlsConfig.ClientKey != "" {
+				log.WithFields(map[string]interface{}{
+					"client_cert": tlsConfig.ClientCert,
+					"client_key":  tlsConfig.ClientKey,
+				}).Debug("Loading client certificate and key")
+				
+				cert, err := tls.LoadX509KeyPair(tlsConfig.ClientCert, tlsConfig.ClientKey)
+				if err != nil {
+					return nil, fmt.Errorf("failed to load client certificate: %w", err)
+				}
+				tlsConf.Certificates = []tls.Certificate{cert}
+			}
+		}
+		
+		config.Net.TLS.Config = tlsConf
 	}
 
 	admin, err := sarama.NewClusterAdmin(brokers, config)
