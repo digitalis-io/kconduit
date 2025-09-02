@@ -263,7 +263,7 @@ func (m EditACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.success = true
-		return m, tea.Sequence(
+		return m, tea.Batch(
 			tea.Println("✅ ACL(s) updated successfully!"),
 			func() tea.Msg { return ViewChangedMsg{View: ACLsTab} },
 		)

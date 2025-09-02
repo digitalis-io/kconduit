@@ -59,9 +59,9 @@ type Model struct {
 	producerModel    ProducerModel
 	consumerModel    ConsumerModel
 	createTopicModel CreateTopicModel
-	createACLModel   CreateACLHuhModel
+	createACLModel   *CreateACLHuhModel
 	editACLModel     EditACLHuhModel
-	deleteACLModel   DeleteACLModel
+	deleteACLModel   *DeleteACLModel
 	editConfigModel  *EditConfigModel
 	aiAssistantModel AIAssistantModel
 	deleteTopicModel DeleteTopicModel
@@ -839,7 +839,7 @@ func (m Model) updateCreateACLView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 	}
 	updatedModel, cmd := m.createACLModel.Update(msg)
-	m.createACLModel = updatedModel.(CreateACLHuhModel)
+	m.createACLModel = updatedModel.(*CreateACLHuhModel)
 	return m, cmd
 }
 
@@ -863,7 +863,6 @@ func (m Model) updateEditACLView(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateDeleteACLView(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case ViewChangedMsg:
 		if msg.View == ACLsTab {
@@ -876,8 +875,7 @@ func (m Model) updateDeleteACLView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	}
-	updatedModel, cmd := m.deleteACLModel.Update(msg)
-	m.deleteACLModel = updatedModel
+	_, cmd := m.deleteACLModel.Update(msg)
 	return m, cmd
 }
 

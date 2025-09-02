@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/axonops/kconduit/pkg/kafka"
+	"github.com/axonops/kconduit/pkg/logger"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
@@ -67,15 +68,15 @@ var (
 	}
 )
 
-func NewCreateACLHuhModel(client *kafka.Client) CreateACLHuhModel {
-	m := CreateACLHuhModel{
+func NewCreateACLHuhModel(client *kafka.Client) *CreateACLHuhModel {
+	m := &CreateACLHuhModel{
 		client:         client,
-		principal:      "User:*",  // Default to all users
-		host:           "*",
+		principal:      "",  // Start empty to ensure user input is captured
+		host:           "*", // Default host to all
 		resourceType:   "Topic",
-		resourceName:   "*",
+		resourceName:   "", // Start empty to ensure user input is captured
 		patternType:    "Literal",
-		operations:     []string{"Read"},
+		operations:     []string{}, // Start with no operations selected
 		permissionType: "Allow",
 		confirm:        false,
 	}
@@ -113,12 +114,14 @@ func (m *CreateACLHuhModel) buildForm() {
 			huh.NewInput().
 				Title("Principal").
 				Description("User principal (e.g., User:alice, User:*)").
+				Placeholder("User:alice").
 				Value(&m.principal).
 				Validate(m.validatePrincipal),
 
 			huh.NewInput().
 				Title("Host").
 				Description("Client host (* for all hosts)").
+				Placeholder("*").
 				Value(&m.host).
 				Validate(m.validateHost),
 
@@ -131,6 +134,7 @@ func (m *CreateACLHuhModel) buildForm() {
 			huh.NewInput().
 				Title("Resource Name").
 				Description("Name of the resource (* for all)").
+				Placeholder("my-topic").
 				Value(&m.resourceName).
 				Validate(m.validateResourceName),
 
@@ -156,9 +160,9 @@ func (m *CreateACLHuhModel) buildForm() {
 
 			huh.NewConfirm().
 				Title("Ready to create ACL?").
-				Description("Press Enter to save, or Esc to cancel").
-				Affirmative("Save").
-				Negative("Cancel").
+				Description("Review your settings and confirm").
+				Affirmative("✅ Create ACL").
+				Negative("❌ Cancel").
 				Value(&m.confirm),
 		),
 	)
@@ -212,7 +216,7 @@ func (m *CreateACLHuhModel) validateOperations(ops []string) error {
 	return nil
 }
 
-func (m CreateACLHuhModel) Init() tea.Cmd {
+func (m *CreateACLHuhModel) Init() tea.Cmd {
 	return m.form.Init()
 }
 
@@ -220,8 +224,25 @@ type aclCreatedMsg struct {
 	err error
 }
 
-func (m CreateACLHuhModel) createACLs() tea.Cmd {
+func (m *CreateACLHuhModel) createACLs() tea.Cmd {
 	return func() tea.Msg {
+		// Validate we have operations to create
+		if len(m.operations) == 0 {
+			return aclCreatedMsg{err: fmt.Errorf("no operations selected")}
+		}
+
+		// Log what we're about to create for debugging
+		log := logger.Get()
+		log.WithFields(map[string]interface{}{
+			"principal":      m.principal,
+			"host":           m.host,
+			"resourceType":   m.resourceType,
+			"resourceName":   m.resourceName,
+			"patternType":    m.patternType,
+			"operations":     m.operations,
+			"permissionType": m.permissionType,
+		}).Info("Creating ACLs")
+
 		// Create an ACL for each selected operation
 		var errors []string
 		successCount := 0
@@ -237,10 +258,17 @@ func (m CreateACLHuhModel) createACLs() tea.Cmd {
 				PermissionType: m.permissionType,
 			}
 
+			log.WithFields(map[string]interface{}{
+				"operation": operation,
+				"acl":       acl,
+			}).Debug("Creating individual ACL")
+
 			err := m.client.CreateACL(acl)
 			if err != nil {
+				log.WithError(err).WithField("operation", operation).Error("Failed to create ACL")
 				errors = append(errors, fmt.Sprintf("%s: %v", operation, err))
 			} else {
+				log.WithField("operation", operation).Info("Successfully created ACL")
 				successCount++
 			}
 		}
@@ -249,11 +277,18 @@ func (m CreateACLHuhModel) createACLs() tea.Cmd {
 			return aclCreatedMsg{err: fmt.Errorf("failed to create %d ACLs: %s", len(errors), strings.Join(errors, "; "))}
 		}
 
+		if successCount == 0 {
+			return aclCreatedMsg{err: fmt.Errorf("no ACLs were created")}
+		}
+
+		log.WithField("count", successCount).Info("Successfully created all ACLs")
 		return aclCreatedMsg{err: nil}
 	}
 }
 
-func (m CreateACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *CreateACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	log := logger.Get()
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -265,9 +300,12 @@ func (m CreateACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		log.WithField("key", msg.String()).Debug("Key pressed in CreateACL")
+
 		switch msg.String() {
 		case "esc":
 			if !m.creating {
+				log.Debug("ESC pressed, returning to ACLs tab")
 				return m, func() tea.Msg { return ViewChangedMsg{View: ACLsTab} }
 			}
 		case "ctrl+c":
@@ -275,15 +313,18 @@ func (m CreateACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case aclCreatedMsg:
+		log.WithField("error", msg.err).Info("ACL creation completed")
 		m.creating = false
 		if msg.err != nil {
+			log.WithError(msg.err).Error("ACL creation failed")
 			m.err = msg.err
 			m.success = false
 			// Don't rebuild form, just return to preserve state
 			return m, nil
 		}
 		m.success = true
-		return m, tea.Sequence(
+		log.Info("ACL(s) created successfully, returning to ACLs tab")
+		return m, tea.Batch(
 			tea.Println("✅ ACL(s) created successfully!"),
 			func() tea.Msg { return ViewChangedMsg{View: ACLsTab} },
 		)
@@ -306,10 +347,33 @@ func (m CreateACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if f, ok := form.(*huh.Form); ok {
 		m.form = f
 
+		// Log current field values to debug the binding issue
+		log.WithFields(map[string]interface{}{
+			"state":        m.form.State,
+			"principal":    m.principal,
+			"resourceName": m.resourceName,
+			"operations":   m.operations,
+		}).Debug("Current form values during update")
+
 		// Check if form is complete
 		if m.form.State == huh.StateCompleted {
-			// Check if user confirmed
+			// The form is completed
+			// Now that we're using pointer receivers, the confirm field should be properly set
+
+			log.WithFields(map[string]interface{}{
+				"confirm":        m.confirm,
+				"principal":      m.principal,
+				"host":           m.host,
+				"resourceType":   m.resourceType,
+				"resourceName":   m.resourceName,
+				"patternType":    m.patternType,
+				"operations":     m.operations,
+				"permissionType": m.permissionType,
+			}).Info("Form completed, checking confirmation")
+
+			// Check if user confirmed (selected "Create ACL")
 			if m.confirm {
+				log.Info("User confirmed, creating ACLs")
 				// Form completed and confirmed, create ACLs
 				m.creating = true
 				return m, tea.Batch(
@@ -317,6 +381,7 @@ func (m CreateACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.createACLs(),
 				)
 			} else {
+				log.Info("User cancelled, returning to ACLs tab")
 				// User cancelled
 				return m, func() tea.Msg { return ViewChangedMsg{View: ACLsTab} }
 			}
@@ -326,7 +391,7 @@ func (m CreateACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m CreateACLHuhModel) View() string {
+func (m *CreateACLHuhModel) View() string {
 	if m.creating {
 		return lipgloss.NewStyle().
 			Padding(2, 4).

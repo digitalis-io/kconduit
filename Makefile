@@ -125,7 +125,7 @@ vet:
 lint:
 	@command -v golangci-lint > /dev/null 2>&1 || (echo "$(RED)golangci-lint not found. Install from https://golangci-lint.run/usage/install/$(NC)" && exit 1)
 	@echo "$(GREEN)Running linter...$(NC)"
-	golangci-lint run ./...
+	golangci-lint run --config .golangci.yml ./cmd/... ./pkg/...
 	@echo "$(GREEN)✓ Linting complete$(NC)"
 
 ## tidy: Tidy and verify module dependencies

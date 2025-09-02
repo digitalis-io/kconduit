@@ -1097,9 +1097,21 @@ func (c *Client) CreateACL(acl ACL) error {
 		"permission_parsed":    aclCreation.PermissionType,
 	}).Debug("Creating ACL with parsed values")
 
+	// More detailed logging before API call
+	log.WithFields(map[string]interface{}{
+		"resource": fmt.Sprintf("%+v", resource),
+		"acl":      fmt.Sprintf("%+v", aclCreation),
+	}).Debug("About to call admin.CreateACL")
+
 	err := c.admin.CreateACL(resource, aclCreation)
 	if err != nil {
-		log.WithError(err).Error("Failed to create ACL")
+		log.WithFields(map[string]interface{}{
+			"error":        err.Error(),
+			"principal":    acl.Principal,
+			"resource":     acl.ResourceName,
+			"resourceType": acl.ResourceType,
+			"operation":    acl.Operation,
+		}).Error("Failed to create ACL - detailed error")
 		return fmt.Errorf("failed to create ACL: %w", err)
 	}
 
@@ -1116,11 +1128,14 @@ func (c *Client) CreateACL(acl ACL) error {
 func (c *Client) DeleteACL(acl ACL) error {
 	log := logger.Get()
 	log.WithFields(map[string]interface{}{
-		"principal":    acl.Principal,
-		"resource":     acl.ResourceName,
-		"resourceType": acl.ResourceType,
-		"operation":    acl.Operation,
-	}).Info("Deleting ACL")
+		"principal":      acl.Principal,
+		"host":          acl.Host,
+		"resourceType":  acl.ResourceType,
+		"resourceName":  acl.ResourceName,
+		"patternType":   acl.PatternType,
+		"operation":     acl.Operation,
+		"permissionType": acl.PermissionType,
+	}).Info("Attempting to delete ACL with filter")
 
 	filter := sarama.AclFilter{
 		ResourceType:              parseResourceType(acl.ResourceType),
@@ -1131,6 +1146,17 @@ func (c *Client) DeleteACL(acl ACL) error {
 		Operation:                 parseOperation(acl.Operation),
 		PermissionType:            parsePermissionType(acl.PermissionType),
 	}
+	
+	// Log the parsed filter values for debugging
+	log.WithFields(map[string]interface{}{
+		"filter.ResourceType":    filter.ResourceType,
+		"filter.ResourceName":    *filter.ResourceName,
+		"filter.PatternType":     filter.ResourcePatternTypeFilter,
+		"filter.Principal":       *filter.Principal,
+		"filter.Host":           *filter.Host,
+		"filter.Operation":      filter.Operation,
+		"filter.PermissionType": filter.PermissionType,
+	}).Debug("Constructed ACL filter")
 
 	matches, err := c.admin.DeleteACL(filter, false)
 	if err != nil {
@@ -1139,7 +1165,20 @@ func (c *Client) DeleteACL(acl ACL) error {
 	}
 
 	if len(matches) == 0 {
-		return fmt.Errorf("no matching ACLs found to delete")
+		// Try with a less specific filter if no matches found
+		// Some Kafka versions might have issues with exact pattern type matching
+		log.Debug("No matches with exact filter, trying with Any pattern type")
+		
+		filter.ResourcePatternTypeFilter = sarama.AclPatternAny
+		matches, err = c.admin.DeleteACL(filter, false)
+		if err != nil {
+			log.WithError(err).Error("Failed to delete ACL with Any pattern")
+			return fmt.Errorf("failed to delete ACL: %w", err)
+		}
+		
+		if len(matches) == 0 {
+			return fmt.Errorf("no matching ACLs found to delete")
+		}
 	}
 
 	log.WithField("deleted", len(matches)).Info("Successfully deleted ACL(s)")
@@ -1193,13 +1232,23 @@ func getPatternTypeName(t sarama.AclResourcePatternType) string {
 }
 
 func parsePatternType(s string) sarama.AclResourcePatternType {
+	log := logger.Get()
+	log.WithField("input", s).Debug("Parsing pattern type")
+	
 	switch s {
 	case "Literal":
 		return sarama.AclPatternLiteral
 	case "Prefixed":
 		return sarama.AclPatternPrefixed
-	default:
+	case "Any":
 		return sarama.AclPatternAny
+	case "":
+		// Default to Literal if empty
+		log.Debug("Empty pattern type, defaulting to Literal")
+		return sarama.AclPatternLiteral
+	default:
+		log.WithField("pattern", s).Warn("Unknown pattern type, defaulting to Literal")
+		return sarama.AclPatternLiteral
 	}
 }
 

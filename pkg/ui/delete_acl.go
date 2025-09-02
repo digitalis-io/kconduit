@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/axonops/kconduit/pkg/kafka"
+	"github.com/axonops/kconduit/pkg/logger"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
@@ -24,8 +25,8 @@ type DeleteACLModel struct {
 	confirm  bool
 }
 
-func NewDeleteACLModel(client *kafka.Client, acl kafka.ACL) DeleteACLModel {
-	m := DeleteACLModel{
+func NewDeleteACLModel(client *kafka.Client, acl kafka.ACL) *DeleteACLModel {
+	m := &DeleteACLModel{
 		client:  client,
 		acl:     acl,
 		confirm: false,
@@ -86,7 +87,7 @@ func (m *DeleteACLModel) buildForm() {
 		WithHeight(m.height - 8)
 }
 
-func (m DeleteACLModel) Init() tea.Cmd {
+func (m *DeleteACLModel) Init() tea.Cmd {
 	return m.form.Init()
 }
 
@@ -94,18 +95,32 @@ type aclDeletedMsg struct {
 	err error
 }
 
-func (m DeleteACLModel) deleteACL() tea.Cmd {
+func (m *DeleteACLModel) deleteACL() tea.Cmd {
 	return func() tea.Msg {
+		log := logger.Get()
+		log.WithFields(map[string]interface{}{
+			"principal":      m.acl.Principal,
+			"host":          m.acl.Host,
+			"resourceType":  m.acl.ResourceType,
+			"resourceName":  m.acl.ResourceName,
+			"patternType":   m.acl.PatternType,
+			"operation":     m.acl.Operation,
+			"permissionType": m.acl.PermissionType,
+		}).Info("Attempting to delete ACL")
+		
 		err := m.client.DeleteACL(m.acl)
 		if err != nil {
-			// Log the error for debugging
-			fmt.Printf("Failed to delete ACL: %v\n", err)
+			log.WithError(err).Error("Failed to delete ACL")
+		} else {
+			log.Info("Successfully deleted ACL")
 		}
 		return aclDeletedMsg{err: err}
 	}
 }
 
-func (m DeleteACLModel) Update(msg tea.Msg) (DeleteACLModel, tea.Cmd) {
+func (m *DeleteACLModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	log := logger.Get()
+	
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -117,9 +132,12 @@ func (m DeleteACLModel) Update(msg tea.Msg) (DeleteACLModel, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		log.WithField("key", msg.String()).Debug("Key pressed in DeleteACL")
+		
 		switch msg.String() {
 		case "esc":
 			if !m.deleting {
+				log.Debug("ESC pressed, returning to ACLs tab")
 				return m, func() tea.Msg { return ViewChangedMsg{View: ACLsTab} }
 			}
 		case "ctrl+c":
@@ -127,14 +145,19 @@ func (m DeleteACLModel) Update(msg tea.Msg) (DeleteACLModel, tea.Cmd) {
 		}
 
 	case aclDeletedMsg:
-		m.deleting = false
+		log.WithField("error", msg.err).Info("ACL deletion completed")
 		if msg.err != nil {
+			log.WithError(msg.err).Error("ACL deletion failed")
+			m.deleting = false
 			m.err = msg.err
 			m.success = false
 			// Show error but don't return to list yet
 			return m, nil
 		}
+		// Set success first, then clear deleting flag to avoid brief error display
 		m.success = true
+		m.deleting = false
+		log.Info("ACL deleted successfully, returning to ACLs tab")
 		// Add a small delay before returning to see the success message
 		return m, tea.Batch(
 			tea.Println("✅ ACL deleted successfully!"),
@@ -161,10 +184,19 @@ func (m DeleteACLModel) Update(msg tea.Msg) (DeleteACLModel, tea.Cmd) {
 	if f, ok := form.(*huh.Form); ok {
 		m.form = f
 
+		// Log current field values to debug the binding issue
+		log.WithFields(map[string]interface{}{
+			"state":    m.form.State,
+			"confirm":  m.confirm,
+		}).Debug("Current form values during update")
+		
 		// Check if form is complete
 		if m.form.State == huh.StateCompleted {
+			log.WithField("confirm", m.confirm).Info("Form completed, checking confirmation")
+			
 			// Check if user confirmed
 			if m.confirm {
+				log.Info("User confirmed, deleting ACL")
 				// Form completed and confirmed, delete ACL
 				m.deleting = true
 				return m, tea.Batch(
@@ -172,6 +204,7 @@ func (m DeleteACLModel) Update(msg tea.Msg) (DeleteACLModel, tea.Cmd) {
 					m.deleteACL(),
 				)
 			} else {
+				log.Info("User cancelled, returning to ACLs tab")
 				// User cancelled
 				return m, func() tea.Msg { return ViewChangedMsg{View: ACLsTab} }
 			}
@@ -181,7 +214,16 @@ func (m DeleteACLModel) Update(msg tea.Msg) (DeleteACLModel, tea.Cmd) {
 	return m, cmd
 }
 
-func (m DeleteACLModel) View() string {
+func (m *DeleteACLModel) View() string {
+	// Check success state first to avoid showing error during transition
+	if m.success {
+		successStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("42")).
+			Bold(true).
+			Padding(2, 4)
+		return successStyle.Render("✅ ACL deleted successfully!")
+	}
+	
 	if m.deleting {
 		return lipgloss.NewStyle().
 			Padding(2, 4).
@@ -191,14 +233,6 @@ func (m DeleteACLModel) View() string {
 				m.acl.ResourceType,
 				m.acl.ResourceName,
 				m.acl.Operation))
-	}
-
-	if m.success {
-		successStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("42")).
-			Bold(true).
-			Padding(2, 4)
-		return successStyle.Render("✅ ACL deleted successfully!")
 	}
 
 	// Error display
