@@ -2,7 +2,7 @@
 
 A powerful terminal UI for Apache Kafka with an AI-powered assistant for natural language operations. Built with Go and Charm's Bubble Tea framework for a beautiful, interactive experience.
 
-![KConduit Demo](images/video.gif)
+[![KConduit Demo Video](https://img.youtube.com/vi/bRF6hGm72gM/maxresdefault.jpg)](https://youtu.be/bRF6hGm72gM)
 
 ## ✨ Features
 

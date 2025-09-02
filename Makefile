@@ -87,7 +87,7 @@ install:
 .PHONY: run
 run-dev: build
 	@echo "$(GREEN)Running $(BINARY_NAME)...$(NC)"
-	./$(BINARY_NAME) -b 127.0.0.1:19094,127.0.0.1:29094,127.0.0.1:39094 \
+	./$(BINARY_NAME) -b 127.0.0.1:29092,127.0.0.1:39092,127.0.0.1:49092 \
     --sasl \
     --sasl-protocol SASL_PLAINTEXT \
     --sasl-mechanism PLAIN \

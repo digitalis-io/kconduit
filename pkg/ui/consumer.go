@@ -13,6 +13,7 @@ import (
 
 type ConsumerModel struct {
 	topic        string
+	topicInfo    *kafka.TopicInfo
 	client       *kafka.Client
 	viewport     viewport.Model
 	messages     []kafka.Message
@@ -24,6 +25,8 @@ type ConsumerModel struct {
 	width        int
 	height       int
 	ready        bool
+	consuming    bool
+	totalBytes   int64
 }
 
 var (
@@ -40,8 +43,22 @@ func NewConsumerModel(topic string, client *kafka.Client) ConsumerModel {
 
 	vp := viewport.New(80, 20) // Initial size, will be resized on WindowSizeMsg
 
+	// Fetch topic information
+	var topicInfo *kafka.TopicInfo
+	topics, err := client.GetTopicDetails()
+	if err == nil {
+		for _, t := range topics {
+			if t.Name == topic {
+				info := t
+				topicInfo = &info
+				break
+			}
+		}
+	}
+
 	return ConsumerModel{
 		topic:       topic,
+		topicInfo:   topicInfo,
 		client:      client,
 		ctx:         ctx,
 		cancel:      cancel,
@@ -49,6 +66,8 @@ func NewConsumerModel(topic string, client *kafka.Client) ConsumerModel {
 		messages:    make([]kafka.Message, 0),
 		viewport:    vp,
 		ready:       false,
+		consuming:   true,
+		totalBytes:  0,
 	}
 }
 
@@ -95,17 +114,24 @@ func (m ConsumerModel) Update(msg tea.Msg) (ConsumerModel, tea.Cmd) {
 		switch msg.String() {
 		case "q", "esc":
 			m.cancel()
+			m.consuming = false
 			return m, ReturnToListView
 		case "c":
 			// Clear messages
 			m.messages = []kafka.Message{}
+			m.totalBytes = 0
 			m.updateContent()
 			m.viewport.GotoTop()
+		case "p":
+			// Pause/Resume consumption
+			m.consuming = !m.consuming
 		}
 
 	case messageReceivedMsg:
-		if msg.message.Topic != "" {
+		if msg.message.Topic != "" && m.consuming {
 			m.messages = append(m.messages, msg.message)
+			// Calculate message size
+			m.totalBytes += int64(len(msg.message.Key) + len(msg.message.Value))
 			m.updateContent()
 			m.viewport.GotoBottom()
 		}
@@ -118,7 +144,7 @@ func (m ConsumerModel) Update(msg tea.Msg) (ConsumerModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		headerHeight := 4
+		headerHeight := 14  // Increased for the new table
 		footerHeight := 3
 
 		if !m.ready {
@@ -161,72 +187,187 @@ func (m *ConsumerModel) updateContent() {
 func (m *ConsumerModel) formatMessage(msg kafka.Message, num int) string {
 	var sb strings.Builder
 
-	// Message header
-	sb.WriteString(fmt.Sprintf("━━━━━ Message #%d ━━━━━\n", num))
+	// Styles
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("86"))
 	
-	// Metadata
-	sb.WriteString(fmt.Sprintf("Partition: %d | Offset: %d | Time: %s\n",
+	metaStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("241"))
+	
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("220"))
+	
+	valueStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252"))
+
+	// Message header with separator
+	sb.WriteString(headerStyle.Render(fmt.Sprintf("╭─── Message #%d ", num)))
+	sb.WriteString(strings.Repeat("─", 40))
+	sb.WriteString("\n")
+	
+	// Metadata line
+	sb.WriteString("│ ")
+	sb.WriteString(metaStyle.Render(fmt.Sprintf("📍 Partition: %d | Offset: %d | ⏰ %s",
 		msg.Partition,
 		msg.Offset,
-		msg.Timestamp.Format("15:04:05"),
-	))
+		msg.Timestamp.Format("15:04:05.000"),
+	)))
+	sb.WriteString("\n")
 
 	// Key (if present)
 	if msg.Key != "" {
-		sb.WriteString(fmt.Sprintf("Key: %s\n", msg.Key))
+		sb.WriteString("│ ")
+		sb.WriteString(keyStyle.Render(fmt.Sprintf("🔑 Key: %s", msg.Key)))
+		sb.WriteString("\n")
 	}
 
 	// Headers (if present)
 	if len(msg.Headers) > 0 {
-		sb.WriteString("Headers:\n")
+		sb.WriteString("│ ")
+		sb.WriteString(headerStyle.Render("📎 Headers:"))
+		sb.WriteString("\n")
 		for k, v := range msg.Headers {
-			sb.WriteString(fmt.Sprintf("  %s: %s\n", k, v))
+			sb.WriteString("│   ")
+			sb.WriteString(metaStyle.Render(fmt.Sprintf("%s: %s", k, v)))
+			sb.WriteString("\n")
 		}
 	}
 
 	// Value
-	sb.WriteString("Value:\n")
+	sb.WriteString("│ ")
+	sb.WriteString(headerStyle.Render("📄 Value:"))
+	sb.WriteString("\n")
 	if msg.Value == "" {
-		sb.WriteString("  (empty)\n")
+		sb.WriteString("│   ")
+		sb.WriteString(metaStyle.Render("(empty)"))
+		sb.WriteString("\n")
 	} else {
 		lines := strings.Split(msg.Value, "\n")
 		for _, line := range lines {
-			sb.WriteString("  ")
-			sb.WriteString(line)
+			sb.WriteString("│   ")
+			sb.WriteString(valueStyle.Render(line))
 			sb.WriteString("\n")
 		}
 	}
 	
-	sb.WriteString("\n")
+	sb.WriteString("╰")
+	sb.WriteString(strings.Repeat("─", 50))
+	sb.WriteString("\n\n")
+	
 	return sb.String()
 }
 
 func (m ConsumerModel) View() string {
 	var sb strings.Builder
 
-	// Title
-	title := fmt.Sprintf("📨 Consumer Mode - Topic: %s | Messages: %d", m.topic, len(m.messages))
-	sb.WriteString(titleStyle.Render(title))
+	// Header
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("229")).
+		Background(lipgloss.Color("57")).
+		Padding(0, 1)
+
+	sb.WriteString(headerStyle.Render("📨 Kafka Consumer"))
 	sb.WriteString("\n\n")
+
+	// Topic Information Table
+	tableStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("86")).
+		Padding(1, 2)
+
+	labelStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("86"))
+
+	valueStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("229"))
+
+	var tableContent strings.Builder
+	tableContent.WriteString(labelStyle.Render("📋 Topic Details") + "\n")
+	tableContent.WriteString(strings.Repeat("─", 60) + "\n\n")
+	
+	tableContent.WriteString(labelStyle.Render("Topic Name:       "))
+	tableContent.WriteString(valueStyle.Render(m.topic) + "\n")
+	
+	if m.topicInfo != nil {
+		tableContent.WriteString(labelStyle.Render("Partitions:       "))
+		tableContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", m.topicInfo.Partitions)) + "\n")
+		
+		tableContent.WriteString(labelStyle.Render("Replication:      "))
+		tableContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", m.topicInfo.ReplicationFactor)) + "\n")
+	}
+	
+	tableContent.WriteString(labelStyle.Render("Messages Received:"))
+	tableContent.WriteString(valueStyle.Render(fmt.Sprintf(" %d", len(m.messages))) + "\n")
+	
+	tableContent.WriteString(labelStyle.Render("Total Bytes:      "))
+	tableContent.WriteString(valueStyle.Render(fmt.Sprintf("%s", formatBytes(m.totalBytes))) + "\n")
+	
+	tableContent.WriteString(labelStyle.Render("Status:           "))
+	if m.err != nil {
+		tableContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("❌ Error"))
+	} else if !m.consuming {
+		tableContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render("⏸️  Paused"))
+	} else if len(m.messages) == 0 {
+		tableContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render("⏳ Waiting"))
+	} else {
+		tableContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("46")).Render("✅ Consuming"))
+	}
+
+	sb.WriteString(tableStyle.Render(tableContent.String()))
+	sb.WriteString("\n\n")
+
+	// Messages Header
+	messagesHeaderStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("86"))
+
+	sb.WriteString(messagesHeaderStyle.Render("📦 Message Stream"))
+	sb.WriteString("\n")
 
 	// Error message
 	if m.err != nil {
-		errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-		sb.WriteString(errorStyle.Render(fmt.Sprintf("Error: %v\n", m.err)))
+		errorStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196")).
+			Bold(true)
+		sb.WriteString(errorStyle.Render(fmt.Sprintf("\n❌ Error: %v\n", m.err)))
 	}
 
-	// Viewport
-	sb.WriteString(m.viewport.View())
+	// Viewport with messages
+	viewportStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240"))
+	
+	sb.WriteString(viewportStyle.Render(m.viewport.View()))
 	sb.WriteString("\n")
 
-	// Footer
-	footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	footer := "↑/↓: Scroll | c: Clear | q/Esc: Back to topics"
+	// Footer with help text
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("241")).
+		Italic(true)
+	
+	footer := "↑/↓: Scroll | p: Pause/Resume | c: Clear | q/Esc: Back"
 	if m.viewport.AtBottom() {
-		footer += " | (at bottom)"
+		footer += " (auto-scrolling)"
 	}
-	sb.WriteString(footerStyle.Render(footer))
+	sb.WriteString(helpStyle.Render(footer))
 
 	return sb.String()
+}
+
+// Helper function to format bytes
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
