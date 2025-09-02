@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/axonops/kconduit/pkg/kafka"
-	"github.com/axonops/kconduit/pkg/logger"
-	"github.com/axonops/kconduit/pkg/ui"
+	"github.com/digitalis-io/kconduit/pkg/kafka"
+	"github.com/digitalis-io/kconduit/pkg/logger"
+	"github.com/digitalis-io/kconduit/pkg/ui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
-	"github.com/axonops/kconduit/pkg/logger"
+	"github.com/digitalis-io/kconduit/pkg/logger"
 )
 
 const topicCacheDuration = 1 * time.Minute

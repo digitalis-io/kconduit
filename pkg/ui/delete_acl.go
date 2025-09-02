@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/axonops/kconduit/pkg/kafka"
-	"github.com/axonops/kconduit/pkg/logger"
+	"github.com/digitalis-io/kconduit/pkg/kafka"
+	"github.com/digitalis-io/kconduit/pkg/logger"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"

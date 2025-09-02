@@ -1,4 +1,4 @@
-module github.com/axonops/kconduit
+module github.com/digitalis-io/kconduit
 
 go 1.24.5
 

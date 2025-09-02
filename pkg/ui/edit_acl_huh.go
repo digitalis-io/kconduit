@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/axonops/kconduit/pkg/kafka"
+	"github.com/digitalis-io/kconduit/pkg/kafka"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"

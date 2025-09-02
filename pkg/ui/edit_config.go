@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axonops/kconduit/pkg/kafka"
-	"github.com/axonops/kconduit/pkg/logger"
+	"github.com/digitalis-io/kconduit/pkg/kafka"
+	"github.com/digitalis-io/kconduit/pkg/logger"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"

@@ -26,12 +26,12 @@ A powerful terminal UI for Apache Kafka with an AI-powered assistant for natural
 
 ### Using Go Install
 ```bash
-go install github.com/axonops/kconduit/cmd/kconduit@latest
+go install github.com/digitalis-io/kconduit/cmd/kconduit@latest
 ```
 
 ### Building from Source
 ```bash
-git clone https://github.com/axonops/kconduit
+git clone https://github.com/digitalis-io/kconduit
 cd kconduit
 make build
 ```
