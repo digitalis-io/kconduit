@@ -98,6 +98,8 @@ dockers:
     extra_files:
       - go.mod
       - go.sum
+      - cmd/
+      - pkg/
     build_flag_templates:
       - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.created={{.Date}}"
@@ -114,6 +116,8 @@ dockers:
     extra_files:
       - go.mod
       - go.sum
+      - cmd/
+      - pkg/
     build_flag_templates:
       - "--platform=linux/arm64"
       - "--label=org.opencontainers.image.created={{.Date}}"
