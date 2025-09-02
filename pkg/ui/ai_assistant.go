@@ -44,6 +44,13 @@ For modifying topic configurations (like compression, retention, etc.), respond 
 For modifying configurations on ALL topics, respond with JSON:
 {"action": "modify_all_configs", "configs": {"compression.type": "gzip", "retention.ms": "604800000"}}
 
+For modifying configurations on topics matching a pattern, respond with JSON:
+{"action": "modify_matching_configs", "pattern": "starts_with:random", "configs": {"compression.type": "lz4"}}
+or
+{"action": "modify_matching_configs", "pattern": "contains:events", "configs": {"retention.ms": "86400000"}}
+or
+{"action": "modify_matching_configs", "pattern": "ends_with:log", "configs": {"compression.type": "gzip"}}
+
 For querying consumer groups (find groups with lag, list groups, etc.), respond with JSON:
 {"action": "query_consumer_groups", "filter": {"lag_greater_than": 10}}
 or
@@ -1219,6 +1226,109 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 
 				if len(successes) == 0 && len(failures) == 0 {
 					response.WriteString(fmt.Sprintf("ℹ️ All topics already have %d or more partitions", int(partitions)))
+				}
+
+				return AIResponseMsg{
+					response: response.String(),
+					err:      nil,
+				}
+			}
+		}
+
+	case "modify_matching_configs":
+		pattern, _ := command["pattern"].(string)
+		configs, _ := command["configs"].(map[string]interface{})
+
+		if pattern != "" && configs != nil {
+			return func() tea.Msg {
+				// Parse the pattern
+				var matchFunc func(string) bool
+				if strings.HasPrefix(pattern, "starts_with:") {
+					prefix := strings.TrimPrefix(pattern, "starts_with:")
+					matchFunc = func(name string) bool {
+						return strings.HasPrefix(name, prefix)
+					}
+				} else if strings.HasPrefix(pattern, "contains:") {
+					substr := strings.TrimPrefix(pattern, "contains:")
+					matchFunc = func(name string) bool {
+						return strings.Contains(name, substr)
+					}
+				} else if strings.HasPrefix(pattern, "ends_with:") {
+					suffix := strings.TrimPrefix(pattern, "ends_with:")
+					matchFunc = func(name string) bool {
+						return strings.HasSuffix(name, suffix)
+					}
+				} else {
+					// Default to exact match
+					matchFunc = func(name string) bool {
+						return name == pattern
+					}
+				}
+
+				// Get all topics
+				topics, err := m.client.GetTopicDetails()
+				if err != nil {
+					return AIResponseMsg{
+						response: fmt.Sprintf("❌ Failed to fetch topics: %v", err),
+						err:      err,
+					}
+				}
+
+				var topicResults []string
+				var topicErrors []string
+				var matchedCount int
+
+				for _, topic := range topics {
+					// Check if topic matches the pattern
+					if !matchFunc(topic.Name) {
+						continue
+					}
+					
+					matchedCount++
+					var configChanges []string
+					var configErrors []string
+
+					for key, value := range configs {
+						if strValue, ok := value.(string); ok {
+							if err := m.client.UpdateTopicConfig(topic.Name, key, strValue); err != nil {
+								configErrors = append(configErrors, fmt.Sprintf("%s: %v", key, err))
+								log.WithField("topic", topic.Name).WithField("config", key).WithError(err).Warn("Failed to apply config")
+							} else {
+								configChanges = append(configChanges, fmt.Sprintf("%s=%s", key, strValue))
+							}
+						}
+					}
+
+					if len(configChanges) > 0 {
+						topicResults = append(topicResults, fmt.Sprintf("%s: %s", topic.Name, strings.Join(configChanges, ", ")))
+					}
+
+					if len(configErrors) > 0 {
+						topicErrors = append(topicErrors, fmt.Sprintf("%s: %s", topic.Name, strings.Join(configErrors, ", ")))
+					}
+				}
+
+				// Format response
+				var response strings.Builder
+				if matchedCount == 0 {
+					response.WriteString(fmt.Sprintf("ℹ️ No topics found matching pattern '%s'\n", pattern))
+				} else {
+					if len(topicResults) > 0 {
+						response.WriteString(fmt.Sprintf("✅ Successfully updated configuration for %d topic(s) matching '%s':\n", len(topicResults), pattern))
+						for _, result := range topicResults {
+							response.WriteString(fmt.Sprintf("  • %s\n", result))
+						}
+					}
+
+					if len(topicErrors) > 0 {
+						if len(topicResults) > 0 {
+							response.WriteString("\n")
+						}
+						response.WriteString(fmt.Sprintf("❌ Failed to update configuration for %d topic(s):\n", len(topicErrors)))
+						for _, err := range topicErrors {
+							response.WriteString(fmt.Sprintf("  • %s\n", err))
+						}
+					}
 				}
 
 				return AIResponseMsg{
