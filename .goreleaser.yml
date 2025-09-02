@@ -91,8 +91,8 @@ changelog:
 
 dockers:
   - image_templates:
-      - "ghcr.io/axonops/{{ .ProjectName }}:{{ .Version }}-amd64"
-      - "ghcr.io/axonops/{{ .ProjectName }}:latest-amd64"
+      - "ghcr.io/digitalis-io/{{ .ProjectName }}:{{ .Version }}-amd64"
+      - "ghcr.io/digitalis-io/{{ .ProjectName }}:latest-amd64"
     use: buildx
     dockerfile: Dockerfile
     build_flag_templates:
@@ -104,8 +104,8 @@ dockers:
       - "--label=org.opencontainers.image.source={{.GitURL}}"
   
   - image_templates:
-      - "ghcr.io/axonops/{{ .ProjectName }}:{{ .Version }}-arm64"
-      - "ghcr.io/axonops/{{ .ProjectName }}:latest-arm64"
+      - "ghcr.io/digitalis-io/{{ .ProjectName }}:{{ .Version }}-arm64"
+      - "ghcr.io/digitalis-io/{{ .ProjectName }}:latest-arm64"
     use: buildx
     dockerfile: Dockerfile
     build_flag_templates:
@@ -118,22 +118,22 @@ dockers:
     goarch: arm64
 
 docker_manifests:
-  - name_template: "ghcr.io/axonops/{{ .ProjectName }}:{{ .Version }}"
+  - name_template: "ghcr.io/digitalis-io/{{ .ProjectName }}:{{ .Version }}"
     image_templates:
-      - "ghcr.io/axonops/{{ .ProjectName }}:{{ .Version }}-amd64"
-      - "ghcr.io/axonops/{{ .ProjectName }}:{{ .Version }}-arm64"
+      - "ghcr.io/digitalis-io/{{ .ProjectName }}:{{ .Version }}-amd64"
+      - "ghcr.io/digitalis-io/{{ .ProjectName }}:{{ .Version }}-arm64"
   
-  - name_template: "ghcr.io/axonops/{{ .ProjectName }}:latest"
+  - name_template: "ghcr.io/digitalis-io/{{ .ProjectName }}:latest"
     image_templates:
-      - "ghcr.io/axonops/{{ .ProjectName }}:latest-amd64"
-      - "ghcr.io/axonops/{{ .ProjectName }}:latest-arm64"
+      - "ghcr.io/digitalis-io/{{ .ProjectName }}:latest-amd64"
+      - "ghcr.io/digitalis-io/{{ .ProjectName }}:latest-arm64"
 
 brews:
   - repository:
-      owner: "axonops"
+      owner: "digitalis-io"
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: "https://github.com/axonops/kconduit"
+    homepage: "https://github.com/digitalis-io/kconduit"
     description: "Powerful terminal UI for Apache Kafka management"
     license: "Apache-2.0"
     test: |
@@ -145,7 +145,7 @@ nfpms:
   - id: packages
     package_name: kconduit
     vendor: Digitalis.IO
-    homepage: "https://github.com/axonops/kconduit"
+    homepage: "https://github.com/digitalis-io/kconduit"
     maintainer: "Digitalis <info@digitalis.io>"
     description: "Powerful terminal UI for Apache Kafka management"
     license: Apache-2.0
@@ -162,7 +162,7 @@ nfpms:
 
 release:
   github:
-    owner: "axonops"
+    owner: "digitalis-io"
     name: "{{ .ProjectName }}"
   draft: false
   prerelease: auto
