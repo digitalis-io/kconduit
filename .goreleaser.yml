@@ -138,18 +138,18 @@ docker_manifests:
       - "ghcr.io/digitalis-io/{{ .ProjectName }}:latest-amd64"
       - "ghcr.io/digitalis-io/{{ .ProjectName }}:latest-arm64"
 
-brews:
-  - repository:
-      owner: "digitalis-io"
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: "https://github.com/digitalis-io/kconduit"
-    description: "Powerful terminal UI for Apache Kafka management"
-    license: "Apache-2.0"
-    test: |
-      system "#{bin}/kconduit", "--version"
-    install: |
-      bin.install "kconduit"
+# brews:
+#   - repository:
+#       owner: "digitalis-io"
+#       name: homebrew-tap
+#       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+#     homepage: "https://github.com/digitalis-io/kconduit"
+#     description: "Powerful terminal UI for Apache Kafka management"
+#     license: "Apache-2.0"
+#     test: |
+#       system "#{bin}/kconduit", "--version"
+#     install: |
+#       bin.install "kconduit"
 
 nfpms:
   - id: packages
