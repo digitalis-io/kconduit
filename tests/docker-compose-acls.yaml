@@ -74,7 +74,6 @@ services:
     ports:
       - "29092:9092"
       - "29094:9094"
-    command: ["sleep", "infinity"]
     environment:
       KAFKA_NODE_ID: 4
       CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
