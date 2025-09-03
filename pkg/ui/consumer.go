@@ -436,9 +436,7 @@ func (m *ConsumerModel) updateTable() {
 	indices := []int{}
 
 	if m.showFiltered && len(m.filteredIndices) > 0 {
-		for _, idx := range m.filteredIndices {
-			indices = append(indices, idx)
-		}
+		indices = append(indices, m.filteredIndices...)
 	} else {
 		for i := range m.messages {
 			indices = append(indices, i)
@@ -491,87 +489,6 @@ func (m *ConsumerModel) formatMessageRow(msg kafka.Message, num int, isSearchRes
 	}
 }
 
-func (m *ConsumerModel) formatMessage(msg kafka.Message, num int, isSearchResult bool, isCurrentMatch bool) string {
-	var sb strings.Builder
-
-	// Styles
-	headerColor := "86"
-	if isSearchResult {
-		headerColor = "220" // Yellow for search results
-	}
-	if isCurrentMatch {
-		headerColor = "46" // Green for current match
-	}
-
-	headerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(headerColor))
-
-	metaStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241"))
-
-	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220"))
-
-	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
-
-	// Message header with separator
-	sb.WriteString(headerStyle.Render(fmt.Sprintf("╭─── Message #%d ", num)))
-	sb.WriteString(strings.Repeat("─", 40))
-	sb.WriteString("\n")
-
-	// Metadata line
-	sb.WriteString("│ ")
-	sb.WriteString(metaStyle.Render(fmt.Sprintf("📍 Partition: %d | Offset: %d | ⏰ %s",
-		msg.Partition,
-		msg.Offset,
-		msg.Timestamp.Format("15:04:05.000"),
-	)))
-	sb.WriteString("\n")
-
-	// Key (if present)
-	if msg.Key != "" {
-		sb.WriteString("│ ")
-		sb.WriteString(keyStyle.Render(fmt.Sprintf("🔑 Key: %s", msg.Key)))
-		sb.WriteString("\n")
-	}
-
-	// Headers (if present)
-	if len(msg.Headers) > 0 {
-		sb.WriteString("│ ")
-		sb.WriteString(headerStyle.Render("📎 Headers:"))
-		sb.WriteString("\n")
-		for k, v := range msg.Headers {
-			sb.WriteString("│   ")
-			sb.WriteString(metaStyle.Render(fmt.Sprintf("%s: %s", k, v)))
-			sb.WriteString("\n")
-		}
-	}
-
-	// Value
-	sb.WriteString("│ ")
-	sb.WriteString(headerStyle.Render("📄 Value:"))
-	sb.WriteString("\n")
-	if msg.Value == "" {
-		sb.WriteString("│   ")
-		sb.WriteString(metaStyle.Render("(empty)"))
-		sb.WriteString("\n")
-	} else {
-		lines := strings.Split(msg.Value, "\n")
-		for _, line := range lines {
-			sb.WriteString("│   ")
-			sb.WriteString(valueStyle.Render(line))
-			sb.WriteString("\n")
-		}
-	}
-
-	sb.WriteString("╰")
-	sb.WriteString(strings.Repeat("─", 50))
-	sb.WriteString("\n\n")
-
-	return sb.String()
-}
 
 func (m ConsumerModel) viewOffsetDialog() string {
 	var sb strings.Builder
