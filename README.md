@@ -1,5 +1,7 @@
 # KConduit
 
+> ⚠️ **BETA RELEASE** - This software is in beta. While functional, it may contain bugs or unexpected behaviors. Please use with caution in production environments.
+
 A powerful terminal UI for Apache Kafka with an AI-powered assistant for natural language operations. Built with Go and Charm's Bubble Tea framework for a beautiful, interactive experience.
 
 [![KConduit Demo Video](https://img.youtube.com/vi/bRF6hGm72gM/maxresdefault.jpg)](https://youtu.be/bRF6hGm72gM)
