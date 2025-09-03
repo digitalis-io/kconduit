@@ -318,6 +318,19 @@ docker-compose -f tests/docker-compose.yaml up -d
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+## About Digitalis
+
+[Digitalis](https://digitalis.io) is a cloud-native technology services company specializing in data engineering, DevOps, and digital transformation. With deep expertise in Apache Kafka and distributed streaming systems, Digitalis provides comprehensive support and consulting services to help organizations leverage their data infrastructure effectively.
+
+### Kafka Support Services
+Digitalis offers professional support and consulting for Apache Kafka deployments, including:
+- 24x7 Fully Managed Service for Kafka clusters
+- Architecture design and implementation
+- Performance optimization and troubleshooting
+- Data streaming solutions and integrations
+
+For enterprise support or consulting services for your Kafka infrastructure, visit [digitalis.io](https://digitalis.io) or contact their team for assistance with your data streaming needs.
+
 ## 📄 License
 
 This project is licensed under the Apache License - see the LICENSE file for details.
