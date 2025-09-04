@@ -3,21 +3,40 @@ package ui
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
-	"github.com/digitalis-io/kconduit/pkg/kafka"
-	"github.com/charmbracelet/bubbles/viewport"
+	"github.com/IBM/sarama"
+	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/digitalis-io/kconduit/pkg/kafka"
+)
+
+type ConsumerMode int
+
+const (
+	ModeNormal ConsumerMode = iota
+	ModeOffsetDialog
+	ModeSearch
+)
+
+type OffsetOption int
+
+const (
+	OffsetOldest OffsetOption = iota
+	OffsetNewest
+	OffsetSpecific
 )
 
 type ConsumerModel struct {
 	topic        string
 	topicInfo    *kafka.TopicInfo
 	client       *kafka.Client
-	viewport     viewport.Model
+	messageTable table.Model
 	messages     []kafka.Message
-	content      string
+	tableRows    []table.Row
 	ctx          context.Context
 	cancel       context.CancelFunc
 	messageChan  chan kafka.Message
@@ -27,14 +46,53 @@ type ConsumerModel struct {
 	ready        bool
 	consuming    bool
 	totalBytes   int64
+	// New fields for offset control
+	mode           ConsumerMode
+	offsetOption   OffsetOption
+	offsetInput    textinput.Model
+	startOffset    int64
+	// New fields for search
+	searchInput     textinput.Model
+	searchTerm      string
+	searchResults   []int
+	currentMatch    int
+	filteredIndices []int
+	showFiltered    bool
 }
-
 
 func NewConsumerModel(topic string, client *kafka.Client) ConsumerModel {
 	ctx, cancel := context.WithCancel(context.Background())
 	messageChan := make(chan kafka.Message, 100)
 
-	vp := viewport.New(80, 20) // Initial size, will be resized on WindowSizeMsg
+	// Initialize message table
+	columns := []table.Column{
+		{Title: "#", Width: 6},
+		{Title: "Timestamp", Width: 20},
+		{Title: "Part", Width: 5},
+		{Title: "Offset", Width: 10},
+		{Title: "Key", Width: 20},
+		{Title: "Value", Width: 50},
+		{Title: "Size", Width: 8},
+	}
+
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithRows([]table.Row{}),
+		table.WithFocused(true),
+		table.WithHeight(20),
+	)
+
+	s := table.DefaultStyles()
+	s.Header = s.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true).
+		Bold(false)
+	s.Selected = s.Selected.
+		Foreground(lipgloss.Color("229")).
+		Background(lipgloss.Color("57")).
+		Bold(false)
+	t.SetStyles(s)
 
 	// Fetch topic information
 	var topicInfo *kafka.TopicInfo
@@ -49,18 +107,35 @@ func NewConsumerModel(topic string, client *kafka.Client) ConsumerModel {
 		}
 	}
 
+	// Initialize text inputs
+	offsetInput := textinput.New()
+	offsetInput.Placeholder = "Enter offset number (e.g., 100)"
+	offsetInput.CharLimit = 20
+
+	searchInput := textinput.New()
+	searchInput.Placeholder = "Search messages..."
+	searchInput.CharLimit = 100
+
 	return ConsumerModel{
-		topic:       topic,
-		topicInfo:   topicInfo,
-		client:      client,
-		ctx:         ctx,
-		cancel:      cancel,
-		messageChan: messageChan,
-		messages:    make([]kafka.Message, 0),
-		viewport:    vp,
-		ready:       false,
-		consuming:   true,
-		totalBytes:  0,
+		topic:           topic,
+		topicInfo:       topicInfo,
+		client:          client,
+		ctx:             ctx,
+		cancel:          cancel,
+		messageChan:     messageChan,
+		messages:        make([]kafka.Message, 0),
+		tableRows:       []table.Row{},
+		messageTable:    t,
+		ready:           false,
+		consuming:       false, // Start with offset dialog
+		totalBytes:      0,
+		mode:            ModeOffsetDialog,
+		offsetOption:    OffsetNewest,
+		offsetInput:     offsetInput,
+		searchInput:     searchInput,
+		searchResults:   []int{},
+		filteredIndices: []int{},
+		startOffset:     sarama.OffsetNewest,
 	}
 }
 
@@ -72,10 +147,10 @@ type consumerErrorMsg struct {
 	err error
 }
 
-func consumeMessages(ctx context.Context, client *kafka.Client, topic string, messageChan chan kafka.Message) tea.Cmd {
+func consumeMessages(ctx context.Context, client *kafka.Client, topic string, messageChan chan kafka.Message, offset int64) tea.Cmd {
 	return func() tea.Msg {
 		go func() {
-			err := client.ConsumeMessages(ctx, topic, messageChan)
+			err := client.ConsumeMessagesWithOffset(ctx, topic, messageChan, offset)
 			if err != nil && ctx.Err() == nil {
 				// Only report error if context wasn't cancelled
 				messageChan <- kafka.Message{} // Send empty message to signal error
@@ -93,15 +168,98 @@ func waitForMessage(messageChan chan kafka.Message) tea.Cmd {
 }
 
 func (m ConsumerModel) Init() tea.Cmd {
-	return tea.Batch(
-		consumeMessages(m.ctx, m.client, m.topic, m.messageChan),
-		waitForMessage(m.messageChan),
-	)
+	// Start with offset dialog, don't consume yet
+	return textinput.Blink
 }
 
 func (m ConsumerModel) Update(msg tea.Msg) (ConsumerModel, tea.Cmd) {
 	var cmds []tea.Cmd
 
+	// Handle offset dialog mode
+	if m.mode == ModeOffsetDialog {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "esc":
+				m.cancel()
+				return m, ReturnToListView
+			case "tab", "down", "j":
+				// Move to next offset option
+				m.offsetOption = OffsetOption((int(m.offsetOption) + 1) % 3)
+				if m.offsetOption == OffsetSpecific {
+					m.offsetInput.Focus()
+					cmds = append(cmds, textinput.Blink)
+				} else {
+					m.offsetInput.Blur()
+				}
+			case "shift+tab", "up", "k":
+				// Move to previous offset option
+				m.offsetOption = OffsetOption((int(m.offsetOption) + 2) % 3)
+				if m.offsetOption == OffsetSpecific {
+					m.offsetInput.Focus()
+					cmds = append(cmds, textinput.Blink)
+				} else {
+					m.offsetInput.Blur()
+				}
+			case "enter":
+				// Start consuming with selected offset
+				switch m.offsetOption {
+				case OffsetOldest:
+					m.startOffset = sarama.OffsetOldest
+				case OffsetNewest:
+					m.startOffset = sarama.OffsetNewest
+				case OffsetSpecific:
+					if offset, err := strconv.ParseInt(m.offsetInput.Value(), 10, 64); err == nil {
+						m.startOffset = offset
+					} else {
+						m.err = fmt.Errorf("invalid offset number: %s", m.offsetInput.Value())
+						return m, nil
+					}
+				}
+				m.mode = ModeNormal
+				m.consuming = true
+				cmds = append(cmds, consumeMessages(m.ctx, m.client, m.topic, m.messageChan, m.startOffset))
+				cmds = append(cmds, waitForMessage(m.messageChan))
+			}
+		}
+		// Update text input if focused
+		if m.offsetOption == OffsetSpecific {
+			var cmd tea.Cmd
+			m.offsetInput, cmd = m.offsetInput.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+	}
+
+	// Handle search mode
+	if m.mode == ModeSearch {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "esc":
+				m.mode = ModeNormal
+				m.searchInput.Blur()
+				m.searchInput.SetValue("")
+				m.showFiltered = false
+				m.updateTable()
+			case "enter":
+				m.searchTerm = m.searchInput.Value()
+				m.performSearch()
+				m.mode = ModeNormal
+				m.searchInput.Blur()
+				if len(m.searchResults) > 0 {
+					m.currentMatch = 0
+					m.scrollToMessage(m.searchResults[0])
+				}
+			}
+		}
+		var cmd tea.Cmd
+		m.searchInput, cmd = m.searchInput.Update(msg)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
+	}
+
+	// Normal mode
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -113,11 +271,35 @@ func (m ConsumerModel) Update(msg tea.Msg) (ConsumerModel, tea.Cmd) {
 			// Clear messages
 			m.messages = []kafka.Message{}
 			m.totalBytes = 0
-			m.updateContent()
-			m.viewport.GotoTop()
+			m.searchResults = []int{}
+			m.filteredIndices = []int{}
+			m.updateTable()
 		case "p":
 			// Pause/Resume consumption
 			m.consuming = !m.consuming
+		case "/":
+			// Enter search mode
+			m.mode = ModeSearch
+			m.searchInput.Focus()
+			cmds = append(cmds, textinput.Blink)
+		case "n":
+			// Next search result
+			if len(m.searchResults) > 0 {
+				m.currentMatch = (m.currentMatch + 1) % len(m.searchResults)
+				m.scrollToMessage(m.searchResults[m.currentMatch])
+			}
+		case "N":
+			// Previous search result
+			if len(m.searchResults) > 0 {
+				m.currentMatch = (m.currentMatch - 1 + len(m.searchResults)) % len(m.searchResults)
+				m.scrollToMessage(m.searchResults[m.currentMatch])
+			}
+		case "f":
+			// Toggle filtered view
+			if len(m.searchResults) > 0 {
+				m.showFiltered = !m.showFiltered
+				m.updateTable()
+			}
 		}
 
 	case messageReceivedMsg:
@@ -125,8 +307,17 @@ func (m ConsumerModel) Update(msg tea.Msg) (ConsumerModel, tea.Cmd) {
 			m.messages = append(m.messages, msg.message)
 			// Calculate message size
 			m.totalBytes += int64(len(msg.message.Key) + len(msg.message.Value))
-			m.updateContent()
-			m.viewport.GotoBottom()
+			// Check if new message matches search
+			if m.searchTerm != "" {
+				if m.messageMatches(msg.message, m.searchTerm) {
+					m.searchResults = append(m.searchResults, len(m.messages)-1)
+				}
+			}
+			m.updateTable()
+			if !m.showFiltered && len(m.messages) > 0 {
+				// Auto-scroll to bottom (select last row)
+				m.messageTable.SetCursor(len(m.tableRows) - 1)
+			}
 		}
 		// Continue waiting for more messages
 		cmds = append(cmds, waitForMessage(m.messageChan))
@@ -137,121 +328,258 @@ func (m ConsumerModel) Update(msg tea.Msg) (ConsumerModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		headerHeight := 14  // Increased for the new table
+		headerHeight := 12 // Header + search bar
 		footerHeight := 3
 
-		if !m.ready {
-			m.viewport = viewport.New(msg.Width, msg.Height-headerHeight-footerHeight)
-			m.viewport.YPosition = headerHeight
-			m.ready = true
-		} else {
-			m.viewport.Width = msg.Width
-			m.viewport.Height = msg.Height - headerHeight - footerHeight
+		tableHeight := msg.Height - headerHeight - footerHeight
+		if tableHeight > 0 {
+			m.messageTable.SetHeight(tableHeight)
 		}
-		m.updateContent()
+
+		// Adjust column widths based on screen width
+		m.adjustColumnWidths(msg.Width)
+		m.ready = true
+		m.updateTable()
 	}
 
-	// Update viewport
+	// Update table
 	var cmd tea.Cmd
-	m.viewport, cmd = m.viewport.Update(msg)
+	m.messageTable, cmd = m.messageTable.Update(msg)
 	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
 }
 
-func (m *ConsumerModel) updateContent() {
-	var sb strings.Builder
+func (m *ConsumerModel) performSearch() {
+	m.searchResults = []int{}
+	m.filteredIndices = []int{}
 
-	if len(m.messages) == 0 {
-		sb.WriteString("\n  Waiting for messages...\n")
-	} else {
-		sb.WriteString(fmt.Sprintf("\n  Found %d messages:\n\n", len(m.messages)))
-		for i, msg := range m.messages {
-			// Format message
-			msgContent := m.formatMessage(msg, i+1)
-			sb.WriteString(msgContent)
-		}
+	if m.searchTerm == "" {
+		return
 	}
 
-	m.content = sb.String()
-	m.viewport.SetContent(m.content)
+	for i, msg := range m.messages {
+		if m.messageMatches(msg, m.searchTerm) {
+			m.searchResults = append(m.searchResults, i)
+			m.filteredIndices = append(m.filteredIndices, i)
+		}
+	}
 }
 
-func (m *ConsumerModel) formatMessage(msg kafka.Message, num int) string {
+func (m *ConsumerModel) messageMatches(msg kafka.Message, searchTerm string) bool {
+	searchLower := strings.ToLower(searchTerm)
+	return strings.Contains(strings.ToLower(msg.Key), searchLower) ||
+		strings.Contains(strings.ToLower(msg.Value), searchLower) ||
+		strings.Contains(strings.ToLower(msg.Topic), searchLower)
+}
+
+func (m *ConsumerModel) scrollToMessage(index int) {
+	if index < 0 || index >= len(m.messages) {
+		return
+	}
+
+	// For table, just set the cursor to the row
+	if m.showFiltered {
+		// Find the filtered row index
+		for i, fidx := range m.filteredIndices {
+			if fidx == index {
+				m.messageTable.SetCursor(i)
+				break
+			}
+		}
+	} else {
+		m.messageTable.SetCursor(index)
+	}
+}
+
+func (m *ConsumerModel) adjustColumnWidths(totalWidth int) {
+	// Dynamically adjust column widths based on available space
+	if totalWidth < 80 {
+		totalWidth = 80
+	}
+
+	// Calculate proportional widths
+	numCol := 6
+	timestampCol := 19
+	partCol := 5
+	offsetCol := 10
+	sizeCol := 8
+
+	// Remaining space for key and value
+	remainingWidth := totalWidth - numCol - timestampCol - partCol - offsetCol - sizeCol - 10 // padding
+
+	keyCol := remainingWidth / 4       // 25% for key
+	valueCol := remainingWidth * 3 / 4 // 75% for value
+
+	if keyCol < 10 {
+		keyCol = 10
+	}
+	if valueCol < 20 {
+		valueCol = 20
+	}
+
+	columns := []table.Column{
+		{Title: "#", Width: numCol},
+		{Title: "Timestamp", Width: timestampCol},
+		{Title: "Part", Width: partCol},
+		{Title: "Offset", Width: offsetCol},
+		{Title: "Key", Width: keyCol},
+		{Title: "Value", Width: valueCol},
+		{Title: "Size", Width: sizeCol},
+	}
+
+	m.messageTable.SetColumns(columns)
+}
+
+func (m *ConsumerModel) updateTable() {
+	m.tableRows = []table.Row{}
+	indices := []int{}
+
+	if m.showFiltered && len(m.filteredIndices) > 0 {
+		indices = append(indices, m.filteredIndices...)
+	} else {
+		for i := range m.messages {
+			indices = append(indices, i)
+		}
+	}
+
+	// Build table rows
+	for _, idx := range indices {
+		if idx >= len(m.messages) {
+			continue
+		}
+		msg := m.messages[idx]
+
+		// Check if this is a search result for highlighting
+		isSearchResult := false
+		for _, sIdx := range m.searchResults {
+			if sIdx == idx {
+				isSearchResult = true
+				break
+			}
+		}
+
+		row := m.formatMessageRow(msg, idx+1, isSearchResult)
+		m.tableRows = append(m.tableRows, row)
+	}
+
+	m.messageTable.SetRows(m.tableRows)
+}
+
+func (m *ConsumerModel) formatMessageRow(msg kafka.Message, num int, isSearchResult bool) table.Row {
+	// Format timestamp
+	timestamp := msg.Timestamp.Format("2006-01-02 15:04:05")
+
+	// Truncate and clean value for table display
+	value := strings.ReplaceAll(msg.Value, "\n", " ")
+	value = strings.ReplaceAll(value, "\t", " ")
+
+	// Calculate message size
+	msgSize := len(msg.Key) + len(msg.Value)
+	sizeStr := formatBytes(int64(msgSize))
+
+	return table.Row{
+		fmt.Sprintf("%d", num),
+		timestamp,
+		fmt.Sprintf("%d", msg.Partition),
+		fmt.Sprintf("%d", msg.Offset),
+		msg.Key,
+		value,
+		sizeStr,
+	}
+}
+
+
+func (m ConsumerModel) viewOffsetDialog() string {
 	var sb strings.Builder
 
-	// Styles
-	headerStyle := lipgloss.NewStyle().
+	// Calculate dialog width based on terminal width
+	boxWidth := 90
+	if m.width > 0 && boxWidth > m.width-4 {
+		boxWidth = m.width - 4
+	}
+	// Dialog style
+	dialogStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("86")).
+		Padding(2, 4).
+		Width(boxWidth)
+
+	titleStyle := lipgloss.NewStyle().
 		Bold(true).
+		Foreground(lipgloss.Color("229")).
+		MarginBottom(1)
+
+	labelStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("86"))
-	
-	metaStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241"))
-	
-	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220"))
-	
-	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
 
-	// Message header with separator
-	sb.WriteString(headerStyle.Render(fmt.Sprintf("╭─── Message #%d ", num)))
-	sb.WriteString(strings.Repeat("─", 40))
-	sb.WriteString("\n")
-	
-	// Metadata line
-	sb.WriteString("│ ")
-	sb.WriteString(metaStyle.Render(fmt.Sprintf("📍 Partition: %d | Offset: %d | ⏰ %s",
-		msg.Partition,
-		msg.Offset,
-		msg.Timestamp.Format("15:04:05.000"),
-	)))
-	sb.WriteString("\n")
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("46")).
+		Bold(true)
 
-	// Key (if present)
-	if msg.Key != "" {
-		sb.WriteString("│ ")
-		sb.WriteString(keyStyle.Render(fmt.Sprintf("🔑 Key: %s", msg.Key)))
-		sb.WriteString("\n")
-	}
-
-	// Headers (if present)
-	if len(msg.Headers) > 0 {
-		sb.WriteString("│ ")
-		sb.WriteString(headerStyle.Render("📎 Headers:"))
-		sb.WriteString("\n")
-		for k, v := range msg.Headers {
-			sb.WriteString("│   ")
-			sb.WriteString(metaStyle.Render(fmt.Sprintf("%s: %s", k, v)))
-			sb.WriteString("\n")
-		}
-	}
-
-	// Value
-	sb.WriteString("│ ")
-	sb.WriteString(headerStyle.Render("📄 Value:"))
-	sb.WriteString("\n")
-	if msg.Value == "" {
-		sb.WriteString("│   ")
-		sb.WriteString(metaStyle.Render("(empty)"))
-		sb.WriteString("\n")
-	} else {
-		lines := strings.Split(msg.Value, "\n")
-		for _, line := range lines {
-			sb.WriteString("│   ")
-			sb.WriteString(valueStyle.Render(line))
-			sb.WriteString("\n")
-		}
-	}
-	
-	sb.WriteString("╰")
-	sb.WriteString(strings.Repeat("─", 50))
+	sb.WriteString(titleStyle.Render("📍 Select Consumer Start Position"))
 	sb.WriteString("\n\n")
-	
-	return sb.String()
+
+	sb.WriteString("Choose where to start consuming messages from:\n\n")
+
+	// Offset options
+	options := []struct {
+		option OffsetOption
+		label  string
+		desc   string
+	}{
+		{OffsetOldest, "Oldest", "Start from the beginning of the topic"},
+		{OffsetNewest, "Latest", "Start from new messages only"},
+		{OffsetSpecific, "Specific Offset", "Start from a specific offset number"},
+	}
+
+	for _, opt := range options {
+		prefix := "  "
+		style := labelStyle
+		if m.offsetOption == opt.option {
+			prefix = "▶ "
+			style = selectedStyle
+		}
+		sb.WriteString(style.Render(fmt.Sprintf("%s%s", prefix, opt.label)))
+		sb.WriteString(fmt.Sprintf(" - %s\n", opt.desc))
+
+		// Show input field if this option is selected
+		if m.offsetOption == opt.option {
+			if opt.option == OffsetSpecific {
+				sb.WriteString("    ")
+				sb.WriteString(m.offsetInput.View())
+				sb.WriteString("\n")
+			}
+		}
+	}
+
+	sb.WriteString("\n")
+
+	// Error display
+	if m.err != nil {
+		errorStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196"))
+		sb.WriteString(errorStyle.Render(fmt.Sprintf("❌ %v\n\n", m.err)))
+	}
+
+	// Help text with examples
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("241")).
+		Italic(true)
+
+	helpText := "↑/↓ or Tab: Navigate | Enter: Start | Esc: Cancel"
+	sb.WriteString(helpStyle.Render(helpText))
+
+	// Center the dialog
+	content := dialogStyle.Render(sb.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
 func (m ConsumerModel) View() string {
+	if m.mode == ModeOffsetDialog {
+		return m.viewOffsetDialog()
+	}
+
 	var sb strings.Builder
 
 	// Header
@@ -263,6 +591,16 @@ func (m ConsumerModel) View() string {
 
 	sb.WriteString(headerStyle.Render("📨 Kafka Consumer"))
 	sb.WriteString("\n\n")
+
+	// Show search bar if in search mode
+	if m.mode == ModeSearch {
+		searchStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("220"))
+		sb.WriteString(searchStyle.Render("🔍 Search: "))
+		sb.WriteString(m.searchInput.View())
+		sb.WriteString("\n\n")
+	}
 
 	// Topic Information Table
 	tableStyle := lipgloss.NewStyle().
@@ -280,24 +618,38 @@ func (m ConsumerModel) View() string {
 	var tableContent strings.Builder
 	tableContent.WriteString(labelStyle.Render("📋 Topic Details") + "\n")
 	tableContent.WriteString(strings.Repeat("─", 60) + "\n\n")
-	
+
 	tableContent.WriteString(labelStyle.Render("Topic Name:       "))
 	tableContent.WriteString(valueStyle.Render(m.topic) + "\n")
-	
+
 	if m.topicInfo != nil {
 		tableContent.WriteString(labelStyle.Render("Partitions:       "))
 		tableContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", m.topicInfo.Partitions)) + "\n")
-		
+
 		tableContent.WriteString(labelStyle.Render("Replication:      "))
 		tableContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", m.topicInfo.ReplicationFactor)) + "\n")
 	}
-	
+
 	tableContent.WriteString(labelStyle.Render("Messages Received:"))
 	tableContent.WriteString(valueStyle.Render(fmt.Sprintf(" %d", len(m.messages))) + "\n")
-	
+
 	tableContent.WriteString(labelStyle.Render("Total Bytes:      "))
 	tableContent.WriteString(valueStyle.Render(formatBytes(m.totalBytes)) + "\n")
-	
+
+	tableContent.WriteString(labelStyle.Render("Start Offset:     "))
+	offsetText := "Latest"
+	if m.startOffset == sarama.OffsetOldest {
+		offsetText = "Oldest"
+	} else if m.startOffset >= 0 {
+		offsetText = fmt.Sprintf("%d", m.startOffset)
+	}
+	tableContent.WriteString(valueStyle.Render(offsetText) + "\n")
+
+	if m.searchTerm != "" {
+		tableContent.WriteString(labelStyle.Render("Search Results:   "))
+		tableContent.WriteString(valueStyle.Render(fmt.Sprintf("%d matches", len(m.searchResults))) + "\n")
+	}
+
 	tableContent.WriteString(labelStyle.Render("Status:           "))
 	if m.err != nil {
 		tableContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("❌ Error"))
@@ -310,14 +662,6 @@ func (m ConsumerModel) View() string {
 	}
 
 	sb.WriteString(tableStyle.Render(tableContent.String()))
-	sb.WriteString("\n\n")
-
-	// Messages Header
-	messagesHeaderStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("86"))
-
-	sb.WriteString(messagesHeaderStyle.Render("📦 Message Stream"))
 	sb.WriteString("\n")
 
 	// Error message
@@ -325,25 +669,34 @@ func (m ConsumerModel) View() string {
 		errorStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("196")).
 			Bold(true)
-		sb.WriteString(errorStyle.Render(fmt.Sprintf("\n❌ Error: %v\n", m.err)))
+		sb.WriteString(errorStyle.Render(fmt.Sprintf("❌ Error: %v\n", m.err)))
 	}
 
-	// Viewport with messages
-	viewportStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240"))
-	
-	sb.WriteString(viewportStyle.Render(m.viewport.View()))
+	// Message table
+	if len(m.messages) == 0 && !m.consuming {
+		// Show a placeholder when not consuming
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241")).
+			Italic(true).
+			Padding(2, 0)
+		sb.WriteString(emptyStyle.Render("No messages to display. Start consuming to see messages."))
+	} else {
+		// Render the message table
+		sb.WriteString(m.messageTable.View())
+	}
 	sb.WriteString("\n")
 
 	// Footer with help text
 	helpStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("241")).
 		Italic(true)
-	
-	footer := "↑/↓: Scroll | p: Pause/Resume | c: Clear | q/Esc: Back"
-	if m.viewport.AtBottom() {
-		footer += " (auto-scrolling)"
+
+	footer := "↑/↓: Navigate | /: Search | n/N: Next/Prev | f: Filter | p: Pause | c: Clear | q: Back"
+	if m.searchTerm != "" && len(m.searchResults) > 0 {
+		footer = fmt.Sprintf("[Match %d/%d] ", m.currentMatch+1, len(m.searchResults)) + footer
+	}
+	if m.showFiltered {
+		footer = "[FILTERED] " + footer
 	}
 	sb.WriteString(helpStyle.Render(footer))
 
@@ -363,4 +716,3 @@ func formatBytes(bytes int64) string {
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
-

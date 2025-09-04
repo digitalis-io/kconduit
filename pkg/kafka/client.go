@@ -565,6 +565,10 @@ func (c *Client) ProduceMessage(topic, key, value string) error {
 }
 
 func (c *Client) ConsumeMessages(ctx context.Context, topic string, messageChan chan<- Message) error {
+	return c.ConsumeMessagesWithOffset(ctx, topic, messageChan, sarama.OffsetOldest)
+}
+
+func (c *Client) ConsumeMessagesWithOffset(ctx context.Context, topic string, messageChan chan<- Message, startOffset int64) error {
 	consumer, err := sarama.NewConsumer(c.brokers, c.config)
 	if err != nil {
 		return fmt.Errorf("failed to create consumer: %w", err)
@@ -581,7 +585,7 @@ func (c *Client) ConsumeMessages(ctx context.Context, topic string, messageChan 
 	var partitionConsumers []sarama.PartitionConsumer
 
 	for _, partition := range partitions {
-		pc, err := consumer.ConsumePartition(topic, partition, sarama.OffsetOldest)
+		pc, err := consumer.ConsumePartition(topic, partition, startOffset)
 		if err != nil {
 			// Close all previously opened partition consumers
 			for _, pcons := range partitionConsumers {
