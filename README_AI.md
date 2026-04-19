@@ -1,29 +1,35 @@
-# KConduit Features
+# KConduit AI Assistant — Natural Language Kafka Management
+
+KConduit includes a built-in AI assistant that lets you manage Apache Kafka clusters using plain English commands directly from the terminal UI. This page documents all supported providers, configuration options, and example commands.
+
+For general usage, installation, and keyboard shortcuts, see the [main README](README.md).
 
 ## Topic Deletion
 
 Topics can be deleted using the `D` key from the Topics tab. For safety:
 - A confirmation dialog will appear requiring you to type the exact topic name
 - The delete button is only enabled when the typed name matches exactly
-- This feature is NOT available through the AI Assistant to prevent accidental deletions
-- Press `ESC` to cancel the deletion at any time
+- This feature is NOT available through the AI assistant to prevent accidental deletions
+- Press `Esc` to cancel the deletion at any time
 
-## AI Assistant for KConduit
+## AI Assistant Overview
 
-The AI Assistant feature allows you to interact with Kafka using natural language commands. Press `A` from any screen to open the AI Assistant.
+The AI assistant lets you interact with Kafka using natural language commands instead of memorizing CLI flags or topic configuration keys. Press `A` from any screen to open the AI assistant panel.
 
 ## Command Line Options
 
 You can specify the AI engine and model via command-line arguments:
 
 ```bash
-./kconduit -b localhost:9092 --ai-engine gemini --ai-model gemini-1.5-pro-latest
+./kconduit -b localhost:9092 --ai-engine gemini --ai-model gemini-3.1-pro-preview
 ./kconduit -b localhost:9092 --ai-engine openai --ai-model gpt-4
 ./kconduit -b localhost:9092 --ai-engine anthropic --ai-model claude-3-opus-20240229
 ./kconduit -b localhost:9092 --ai-engine ollama --ai-model llama2
 ```
 
-## Supported Providers
+## Supported AI Providers
+
+KConduit supports four AI providers. The assistant automatically selects the first provider that has an API key configured in the environment.
 
 ### 1. OpenAI (ChatGPT)
 ```bash
@@ -37,7 +43,7 @@ export OPENAI_MODEL="gpt-3.5-turbo"  # Optional, defaults to gpt-3.5-turbo
 ### 2. Google Gemini
 ```bash
 export GEMINI_API_KEY="your-api-key-here"
-export GEMINI_MODEL="gemini-1.5-pro-latest"  # Optional, defaults to gemini-1.5-pro-latest
+export GEMINI_MODEL="gemini-3.1-pro-preview"  # Optional, defaults to gemini-3.1-pro-preview
 ./kconduit -b localhost:9092
 # Or override with command-line
 ./kconduit -b localhost:9092 --ai-engine gemini --ai-model gemini-1.5-flash
@@ -52,8 +58,8 @@ export ANTHROPIC_MODEL="claude-3-haiku-20240307"  # Optional, defaults to claude
 ./kconduit -b localhost:9092 --ai-engine anthropic --ai-model claude-3-opus-20240229
 ```
 
-### 4. Ollama (Local LLM)
-First install and run Ollama:
+### 4. Ollama (Local LLM — No API Key Required)
+Run Kafka management AI entirely on your own hardware with no external API calls:
 ```bash
 # Install Ollama
 curl -fsSL https://ollama.com/install.sh | sh
@@ -74,13 +80,13 @@ export OLLAMA_MODEL="llama2"  # Optional, defaults to llama2
 
 ## Using the AI Assistant
 
-1. Press `A` from any screen to open the AI Assistant
+1. Press `A` from any screen to open the AI assistant
 2. Type your command in natural language
 3. Press `Tab` to cycle through providers (OpenAI → Gemini → Anthropic → Ollama)
 4. Press `Enter` to execute the command
-5. Press `ESC` to exit the AI Assistant
+5. Press `Esc` to exit the AI assistant
 
-The assistant will automatically select the first provider that has an API key configured.
+The assistant automatically selects the first provider that has an API key configured.
 
 ## Example Commands
 
@@ -94,6 +100,7 @@ The assistant will automatically select the first provider that has an API key c
 - "Modify retention to 7 days on topic orders"
 
 ### Batch Operations (ALL Topics)
+Run a single command to update every topic in the Kafka cluster at once:
 - "Increase partitions to 100 on all topics"
 - "Set compression to gzip on all topics"
 - "Change retention to 7 days for all topics"
@@ -130,15 +137,16 @@ Configuration options are applied in the following order (highest priority first
 | `OPENAI_API_KEY` | OpenAI API key for ChatGPT | - |
 | `OPENAI_MODEL` | OpenAI model to use | gpt-3.5-turbo |
 | `GEMINI_API_KEY` | Google Gemini API key | - |
-| `GEMINI_MODEL` | Gemini model to use | gemini-pro |
+| `GEMINI_MODEL` | Gemini model to use | gemini-3.1-pro-preview |
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude | - |
 | `ANTHROPIC_MODEL` | Claude model to use | claude-3-haiku-20240307 |
 | `OLLAMA_URL` | Ollama server URL | http://localhost:11434 |
 | `OLLAMA_MODEL` | Ollama model to use | llama2 |
 
-### Supported Operations
+### Supported Kafka Operations
 
-The AI Assistant will automatically detect and parse commands for:
+The AI assistant detects and parses natural language commands for the following Kafka management tasks:
+
 - Creating topics with specific configurations
 - Setting partition counts
 - Setting replication factors
@@ -162,7 +170,8 @@ The AI Assistant will automatically detect and parse commands for:
 ## Notes
 
 - The assistant automatically selects the first provider with a configured API key
-- You can cycle through all providers using the Tab key
+- You can cycle through all providers using the `Tab` key
 - The current provider and model are displayed in the title bar
-- The AI Assistant can parse JSON responses and execute Kafka operations automatically
+- The AI assistant parses JSON responses and executes Kafka operations automatically
 - Topic creation happens immediately after the AI parses the command successfully
+- Topic deletion is intentionally blocked in the AI assistant — use the `D` key in the Topics tab instead

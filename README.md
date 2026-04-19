@@ -1,28 +1,35 @@
-# KConduit
+# KConduit — Kafka Terminal UI with AI Assistant
 
 > ⚠️ **BETA RELEASE** - This software is in beta. While functional, it may contain bugs or unexpected behaviors. Please use with caution in production environments.
 
-A powerful terminal UI for Apache Kafka with an AI-powered assistant for natural language operations. Built with Go and Charm's Bubble Tea framework for a beautiful, interactive experience.
+**KConduit** is an open-source Kafka CLI and terminal UI (TUI) for Apache Kafka management, built with Go and [Charm's Bubble Tea](https://github.com/charmbracelet/bubbletea) framework. It provides a fast, keyboard-driven alternative to web-based Kafka GUI tools, with a built-in AI assistant that accepts natural language commands for topic management, consumer group monitoring, and cluster operations — no browser required.
 
-[![KConduit Demo Video](https://img.youtube.com/vi/bRF6hGm72gM/maxresdefault.jpg)](https://youtu.be/bRF6hGm72gM)
+[![Go Version](https://img.shields.io/badge/go-1.24%2B-blue)](https://golang.org/dl/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/digitalis-io/kconduit)](https://github.com/digitalis-io/kconduit/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/digitalis-io/kconduit)](https://goreportcard.com/report/github.com/digitalis-io/kconduit)
+
+[![KConduit — Kafka TUI demo showing topic management and AI assistant](https://img.youtube.com/vi/bRF6hGm72gM/maxresdefault.jpg)](https://youtu.be/bRF6hGm72gM)
 
 ## ✨ Features
 
-### Core Functionality
+### Core Kafka Management
 - 🔌 **Multi-Broker Support** - Connect to Apache Kafka clusters with multiple brokers
-- 📊 **Comprehensive Views** - Browse brokers, topics, consumer groups, and ACLs in tabbed interface
-- 🎯 **Topic Management** - Create, configure, and delete topics with safety confirmations
-- 📨 **Message Operations** - Produce and consume messages with formatted display
+- 📊 **Comprehensive Views** - Browse brokers, topics, consumer groups, and ACLs in a tabbed interface
+- 🎯 **Topic Management** - Create, configure, and delete Kafka topics with safety confirmations
+- 📨 **Message Operations** - Produce and consume Kafka messages with formatted display
 - ⚙️ **Configuration Editor** - View and modify topic configurations in real-time
 - 👥 **Consumer Group Monitoring** - Track consumer groups with lag calculation
 - 🔄 **Auto-Refresh** - Real-time updates of cluster state
 
-### AI Assistant
-- 🤖 **Natural Language Commands** - Interact with Kafka using plain English
-- 🎯 **Multi-Provider Support** - OpenAI, Google Gemini, Anthropic Claude, and Ollama
+### AI Assistant for Kafka
+- 🤖 **Natural Language Commands** - Manage Kafka using plain English instead of CLI flags
+- 🎯 **Multi-Provider Support** - OpenAI (ChatGPT), Google Gemini, Anthropic Claude, and Ollama (local LLM)
 - 🔄 **Batch Operations** - Modify all topics at once with a single command
-- 📝 **Multi-Step Execution** - Execute complex operations in sequence
-- 🔍 **Smart Queries** - Find topics and consumer groups based on various criteria
+- 📝 **Multi-Step Execution** - Execute complex Kafka operations in sequence
+- 🔍 **Smart Queries** - Find topics and consumer groups by partition count, compression, lag, and more
+
+See [README_AI.md](README_AI.md) for full AI assistant documentation and example commands.
 
 ## 📦 Installation
 
@@ -102,6 +109,9 @@ make build
 ```
 
 ### AI Assistant Configuration
+
+KConduit's built-in AI assistant lets you manage Kafka topics and consumer groups using natural language. See [README_AI.md](README_AI.md) for the full command reference.
+
 ```bash
 # Using OpenAI
 export OPENAI_API_KEY="your-api-key"
@@ -109,23 +119,44 @@ export OPENAI_API_KEY="your-api-key"
 
 # Using Google Gemini
 export GEMINI_API_KEY="your-api-key"
-./kconduit -b localhost:9092 --ai-engine gemini --ai-model gemini-1.5-pro-latest
+./kconduit -b localhost:9092 --ai-engine gemini --ai-model gemini-3.1-pro-preview
 
 # Using Anthropic Claude
 export ANTHROPIC_API_KEY="your-api-key"
 ./kconduit -b localhost:9092 --ai-engine anthropic --ai-model claude-3-opus-20240229
 
-# Using Local Ollama
+# Using Local Ollama (no API key required)
 ollama serve  # In another terminal
 ./kconduit -b localhost:9092 --ai-engine ollama --ai-model llama2
 ```
 
+### Session Management
+
+KConduit can save and load connection profiles so you do not need to repeat broker addresses and authentication flags on every invocation.
+
+```bash
+# Save the current connection config as a named session
+./kconduit -b broker:9092 --sasl --sasl-username alice --save-session prod
+
+# Load a saved session
+./kconduit --session prod
+
+# List all saved sessions
+./kconduit --list-sessions
+```
+
+Saved sessions are stored in `~/.config/kconduit/sessions.yaml`. Plaintext passwords are never persisted to disk. Supply the password at runtime via the `KCONDUIT_SASL_PASSWORD` environment variable, or set the `password_file` field in the YAML to a path containing the password.
+
+You can also open the Session Manager interactively at any time by pressing `s` from the main view.
+
 ## ⌨️ Keyboard Shortcuts
 
 ### Global Navigation
-- `→/←` or `1-4` - Switch between tabs (Brokers, Topics, Consumer Groups, ACLs)
-- `r` - Refresh current view
-- `A` - Open AI Assistant
+- `Tab` / `Shift+Tab` - Cycle forward/backward through tabs (Brokers, Topics, Consumer Groups, ACLs)
+- `1-4` - Jump directly to a tab by number
+- `r` / `R` - Refresh current view
+- `A` / `a` - Open AI Assistant
+- `s` / `S` - Open Session Manager
 - `q` or `Ctrl+C` - Quit application
 
 ### Topics Tab
@@ -162,6 +193,8 @@ ollama serve  # In another terminal
 - `Esc` - Cancel/Return to ACL list
 
 ## 🤖 AI Assistant Commands
+
+Press `A` from any screen to open the AI assistant. For full provider setup and command examples, see [README_AI.md](README_AI.md).
 
 ### Topic Management
 ```
@@ -207,6 +240,8 @@ ollama serve  # In another terminal
 | `KCONDUIT_BROKERS` | Kafka broker addresses | localhost:9092 |
 | `KCONDUIT_LOG_LEVEL` | Log level (debug, info, warn, error) | info |
 | `KCONDUIT_LOG_FILE` | Log file path | stderr |
+| `KCONDUIT_AI_ENGINE` | AI engine (openai, gemini, anthropic, ollama) | gemini |
+| `KCONDUIT_AI_MODEL` | AI model to use | gemini-3.1-pro-preview |
 | `KCONDUIT_SASL_ENABLED` | Enable SASL authentication | false |
 | `KCONDUIT_SASL_MECHANISM` | SASL mechanism | PLAIN |
 | `KCONDUIT_SASL_USERNAME` | SASL username | - |
@@ -220,7 +255,7 @@ ollama serve  # In another terminal
 | `OPENAI_API_KEY` | OpenAI API key for AI assistant | - |
 | `OPENAI_MODEL` | OpenAI model to use | gpt-3.5-turbo |
 | `GEMINI_API_KEY` | Google Gemini API key | - |
-| `GEMINI_MODEL` | Gemini model to use | gemini-1.5-pro-latest |
+| `GEMINI_MODEL` | Gemini model to use | gemini-3.1-pro-preview |
 | `ANTHROPIC_API_KEY` | Anthropic API key | - |
 | `ANTHROPIC_MODEL` | Claude model to use | claude-3-haiku-20240307 |
 | `OLLAMA_URL` | Ollama server URL | http://localhost:11434 |
@@ -233,12 +268,15 @@ ollama serve  # In another terminal
 | `-b, --brokers` | Comma-separated list of Kafka brokers | localhost:9092 |
 | `--log-level` | Log level (debug, info, warn, error) | info |
 | `--log-file` | Log file path (empty for stderr) | - |
-| `--ai-engine` | AI engine (openai, gemini, anthropic, ollama) | auto-detect |
-| `--ai-model` | AI model to use | provider default |
+| `--ai-engine` | AI engine (openai, gemini, anthropic, ollama) | gemini |
+| `--ai-model` | AI model to use | gemini-3.1-pro-preview |
+| `--session` | Load a saved connection session by name | - |
+| `--save-session` | Save current connection config as a named session and exit | - |
+| `--list-sessions` | List all saved connection sessions and exit | - |
 | `--sasl` | Enable SASL authentication | false |
 | `--sasl-mechanism` | SASL mechanism (PLAIN, SCRAM-SHA-256, SCRAM-SHA-512) | PLAIN |
 | `--sasl-username` | SASL username | - |
-| `--sasl-password` | SASL password | - |
+| `--sasl-password` | SASL password (**deprecated** — use `KCONDUIT_SASL_PASSWORD` instead) | - |
 | `--sasl-protocol` | Security protocol (SASL_PLAINTEXT, SASL_SSL) | SASL_PLAINTEXT |
 | `--tls` | Enable TLS/SSL | false |
 | `--tls-ca-cert` | Path to CA certificate file | - |
@@ -249,7 +287,7 @@ ollama serve  # In another terminal
 ## 🏗️ Building & Development
 
 ### Requirements
-- Go 1.20+
+- Go 1.24+
 - Access to a Kafka cluster
 
 ### Build Commands
@@ -270,9 +308,9 @@ docker-compose -f tests/docker-compose.yaml up -d
 
 ## 🔒 Safety Features
 
-- **Topic Deletion Protection** - Requires typing exact topic name for confirmation
-- **AI Safety** - AI Assistant cannot perform delete operations
-- **Error Recovery** - Failed operations in batch don't stop other operations
+- **Topic Deletion Protection** - Requires typing the exact topic name for confirmation
+- **AI Safety** - The AI assistant cannot perform delete operations
+- **Error Recovery** - Failed operations in a batch do not stop other operations
 - **Comprehensive Logging** - All operations logged for audit trail
 
 ## 📋 Supported Kafka Operations
@@ -299,9 +337,9 @@ docker-compose -f tests/docker-compose.yaml up -d
 
 ### ACL Operations
 - ✅ List all ACLs with detailed information
-- ✅ Create new ACLs with beautiful form interface
+- ✅ Create new ACLs with form interface
 - ✅ Edit existing ACLs with pre-filled values
-- ✅ Multi-select operations - create multiple ACLs at once
+- ✅ Multi-select operations — create multiple ACLs at once
 - ✅ Support for all resource types (Topic, Group, Cluster, TransactionalId)
 - ✅ Support for all operations (Read, Write, Create, Delete, etc.)
 - ✅ Pattern-based resource matching (Literal, Prefixed, Any)
@@ -333,12 +371,12 @@ For enterprise support or consulting services for your Kafka infrastructure, vis
 
 ## 📄 License
 
-This project is licensed under the Apache License - see the LICENSE file for details.
+This project is licensed under the Apache License 2.0 — see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
 - Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) by Charm
-- Uses [Sarama](https://github.com/IBM/sarama) for Kafka operations
+- Uses [Sarama](https://github.com/IBM/sarama) for Kafka client operations
 - AI providers: OpenAI, Google Gemini, Anthropic, and Ollama
 
 ## 📄 Legal Notices
