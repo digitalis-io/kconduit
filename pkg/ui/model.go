@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/digitalis-io/kconduit/pkg/kafka"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -26,6 +27,7 @@ const (
 	CreateACLView
 	EditACLView
 	DeleteACLView
+	SessionManagerView
 )
 
 type TabView int
@@ -61,18 +63,21 @@ type Model struct {
 	createTopicModel CreateTopicModel
 	createACLModel   *CreateACLHuhModel
 	editACLModel     EditACLHuhModel
-	deleteACLModel   *DeleteACLModel
-	editConfigModel  *EditConfigModel
-	aiAssistantModel AIAssistantModel
-	deleteTopicModel DeleteTopicModel
-	selectedTopic    string
-	activeTab        TabView
-	focusedPanel     int // 0: topics list, 1: config table (when in Topics tab)
-	aiEngine         string
-	aiModel          string
+	deleteACLModel       *DeleteACLModel
+	editConfigModel      *EditConfigModel
+	aiAssistantModel     AIAssistantModel
+	deleteTopicModel     DeleteTopicModel
+	sessionManagerModel  SessionManagerModel
+	spinner              spinner.Model
+	selectedTopic        string
+	activeTab            TabView
+	focusedPanel         int // 0: topics list, 1: config table (when in Topics tab)
+	aiEngine             string
+	aiModel              string
+	activeSession        string
 }
 
-func NewModel(client *kafka.Client, aiEngine string, aiModel string) Model {
+func NewModel(client *kafka.Client, aiEngine string, aiModel string, activeSession string) Model {
 	// Topics table
 	topicsColumns := []table.Column{
 		{Title: "Topic Name", Width: 30},
@@ -106,15 +111,8 @@ func NewModel(client *kafka.Client, aiEngine string, aiModel string) Model {
 
 	// Set styles for both tables
 	s := table.DefaultStyles()
-	s.Header = s.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		BorderBottom(true).
-		Bold(false)
-	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
-		Bold(false)
+	s.Header = tableHeaderStyle()
+	s.Selected = tableSelectedStyle()
 
 	topicsTable.SetStyles(s)
 	brokersTable.SetStyles(s)
@@ -133,18 +131,9 @@ func NewModel(client *kafka.Client, aiEngine string, aiModel string) Model {
 
 	// Custom styles for config table with colors
 	configStyles := table.DefaultStyles()
-	configStyles.Header = configStyles.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		BorderBottom(true).
-		Bold(true).
-		Foreground(lipgloss.Color("213")) // Purple for headers
-	configStyles.Cell = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("87")) // Cyan for keys
-	configStyles.Selected = configStyles.Selected.
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
-		Bold(false)
+	configStyles.Header = tableHeaderStyle().Foreground(theme.Primary)
+	configStyles.Cell = lipgloss.NewStyle().Foreground(theme.Accent)
+	configStyles.Selected = tableSelectedStyle()
 
 	configTable.SetStyles(configStyles)
 
@@ -165,17 +154,23 @@ func NewModel(client *kafka.Client, aiEngine string, aiModel string) Model {
 	)
 	consumersTable.SetStyles(s)
 
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(theme.Primary)
+
 	return Model{
 		topicsTable:    topicsTable,
 		brokersTable:   brokersTable,
 		configTable:    configTable,
 		consumersTable: consumersTable,
 		client:         client,
+		spinner:        sp,
 		loading:        true,
 		mode:           ListView,
 		activeTab:      BrokersTab,
 		aiEngine:       aiEngine,
 		aiModel:        aiModel,
+		activeSession:  activeSession,
 	}
 }
 
@@ -258,10 +253,13 @@ func fetchTopicConfig(client *kafka.Client, topicName string) tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	// Add a small delay to allow connection to establish
-	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
-		return tickMsg{}
-	})
+	// Start spinner and add a small delay to allow connection to establish
+	return tea.Batch(
+		m.spinner.Tick,
+		tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
+			return tickMsg{}
+		}),
+	)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -284,6 +282,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateEditACLView(msg)
 	case DeleteACLView:
 		return m.updateDeleteACLView(msg)
+	case SessionManagerView:
+		return m.updateSessionManagerView(msg)
 	default:
 		return m.updateListView(msg)
 	}
@@ -292,10 +292,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
+	// Always update spinner
+	var spinnerCmd tea.Cmd
+	m.spinner, spinnerCmd = m.spinner.Update(msg)
+	if spinnerCmd != nil {
+		cmds = append(cmds, spinnerCmd)
+	}
+
 	switch msg := msg.(type) {
 	case tickMsg:
 		// Initial load after connection established
-		return m, tea.Batch(fetchTopics(m.client), fetchBrokers(m.client))
+		return m, tea.Batch(fetchTopics(m.client), fetchBrokers(m.client), m.spinner.Tick)
 
 	case tea.KeyMsg:
 		switch s := msg.String(); s {
@@ -443,6 +450,11 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = CreateTopicView
 				return m, m.createTopicModel.Init()
 			}
+		case "s", "S":
+			// Open session manager
+			m.sessionManagerModel = NewSessionManagerModel(m.activeSession)
+			m.mode = SessionManagerView
+			return m, m.sessionManagerModel.Init()
 		case "A", "a":
 			// Open AI Assistant
 			m.aiAssistantModel = NewAIAssistantModel(m.client, m.aiEngine, m.aiModel)
@@ -680,17 +692,10 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 				table.WithHeight(10),
 			)
 
-			s := table.DefaultStyles()
-			s.Header = s.Header.
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderForeground(lipgloss.Color("240")).
-				BorderBottom(true).
-				Bold(false)
-			s.Selected = s.Selected.
-				Foreground(lipgloss.Color("229")).
-				Background(lipgloss.Color("57")).
-				Bold(false)
-			t.SetStyles(s)
+			as := table.DefaultStyles()
+			as.Header = tableHeaderStyle()
+			as.Selected = tableSelectedStyle()
+			t.SetStyles(as)
 			m.aclTable = &t
 		}
 
@@ -941,6 +946,18 @@ func (m Model) updateDeleteTopicView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateSessionManagerView(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg.(type) {
+	case SwitchToListViewMsg:
+		m.mode = ListView
+		return m, nil
+	}
+
+	updated, cmd := m.sessionManagerModel.Update(msg)
+	m.sessionManagerModel = updated
+	return m, cmd
+}
+
 func (m Model) View() string {
 	switch m.mode {
 	case ProducerView:
@@ -961,279 +978,306 @@ func (m Model) View() string {
 		return m.aiAssistantModel.View()
 	case DeleteTopicView:
 		return m.deleteTopicModel.View()
+	case SessionManagerView:
+		return m.sessionManagerModel.View()
 	default:
 		return m.listView()
 	}
 }
 
 func (m Model) listView() string {
-	var sb strings.Builder
+	// Build the three sections: header, content, footer
+	header := m.renderTabBar()
 
-	// Render tab bar
-	tabBar := m.renderTabBar()
-	sb.WriteString(tabBar)
-	sb.WriteString("\n\n")
-
-	if m.loading {
-		sb.WriteString("Loading...")
-		return sb.String()
-	}
-
-	if m.err != nil {
-		sb.WriteString(fmt.Sprintf("Error: %v\n", m.err))
-		sb.WriteString("\nPress 'r' to retry or 'q' to quit")
-		return sb.String()
-	}
-
-	// Render content based on active tab
 	var content string
-	switch m.activeTab {
-	case BrokersTab:
-		content = m.renderBrokersView()
-	case TopicsTab:
-		content = m.renderTopicsView()
-	case ConsumerGroupsTab:
-		content = m.renderConsumerGroupsView()
-	case ACLsTab:
-		content = m.renderACLsView()
-	}
-
-	sb.WriteString(content)
-	sb.WriteString("\n\n")
-
-	// Footer with context-sensitive help
-	help := m.getHelpText()
-	sb.WriteString(help)
-
-	return sb.String()
-}
-
-func (m Model) renderTabBar() string {
-	tabs := []string{"Brokers", "Topics", "Consumer Groups", "ACLs"}
-
-	activeTabStyle := lipgloss.NewStyle().
-		Bold(true).
-		Background(lipgloss.Color("57")).
-		Foreground(lipgloss.Color("229")).
-		Padding(0, 2)
-
-	inactiveTabStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
-		Padding(0, 2)
-
-	var renderedTabs []string
-	for i, tab := range tabs {
-		prefix := fmt.Sprintf("[%d] ", i+1)
-		if TabView(i) == m.activeTab {
-			renderedTabs = append(renderedTabs, activeTabStyle.Render(prefix+tab))
-		} else {
-			renderedTabs = append(renderedTabs, inactiveTabStyle.Render(prefix+tab))
+	if m.loading {
+		loadingStyle := lipgloss.NewStyle().
+			Foreground(theme.SubText).
+			PaddingLeft(2).
+			PaddingTop(1)
+		content = loadingStyle.Render(m.spinner.View() + "  Connecting to Kafka cluster...")
+	} else if m.err != nil {
+		errBox := lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(theme.Error).
+			Padding(1, 2).
+			Width(60)
+		content = errBox.Render(
+			errorStyle.Render("Error: "+m.err.Error()) + "\n\n" +
+				labelStyle.Render("Press ") + helpKeyStyle.Render("r") + labelStyle.Render(" to retry or ") +
+				helpKeyStyle.Render("q") + labelStyle.Render(" to quit"),
+		)
+	} else {
+		switch m.activeTab {
+		case BrokersTab:
+			content = m.renderBrokersView()
+		case TopicsTab:
+			content = m.renderTopicsView()
+		case ConsumerGroupsTab:
+			content = m.renderConsumerGroupsView()
+		case ACLsTab:
+			content = m.renderACLsView()
 		}
 	}
 
-	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
+	footer := m.renderStatusBar()
 
-	// Add title
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("229"))
+	// Stack: header + content + spacer + footer
+	// Calculate available height for content
+	headerHeight := lipgloss.Height(header)
+	footerHeight := lipgloss.Height(footer)
+	contentHeight := m.height - headerHeight - footerHeight - 3 // 3 for spacing
 
-	title := titleStyle.Render("🚀 KConduit - Kafka Management")
+	paddedContent := lipgloss.NewStyle().
+		Height(contentHeight).
+		Render(content)
 
-	return lipgloss.JoinVertical(lipgloss.Left, title, tabBar)
+	return lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		paddedContent,
+		footer,
+	)
+}
+
+func (m Model) renderTabBar() string {
+	tabs := []struct {
+		key  string
+		name string
+	}{
+		{"1", "Brokers"},
+		{"2", "Topics"},
+		{"3", "Groups"},
+		{"4", "ACLs"},
+	}
+
+	var renderedTabs []string
+	for i, tab := range tabs {
+		label := tab.key + " " + tab.name
+		if TabView(i) == m.activeTab {
+			renderedTabs = append(renderedTabs, activeTabStyle.Render(label))
+		} else {
+			renderedTabs = append(renderedTabs, inactiveTabStyle.Render(label))
+		}
+	}
+
+	row := lipgloss.JoinHorizontal(lipgloss.Bottom, renderedTabs...)
+
+	// Fill remaining width with a bottom border
+	rowWidth := lipgloss.Width(row)
+	if remaining := m.width - rowWidth - 2; remaining > 0 {
+		gap := tabGapStyle.Width(remaining).Render("")
+		row = lipgloss.JoinHorizontal(lipgloss.Bottom, row, gap)
+	}
+
+	// Title line above tabs
+	title := appHeaderStyle.Render("KConduit")
+	titleRight := ""
+	if m.activeSession != "" {
+		titleRight = lipgloss.NewStyle().
+			Foreground(theme.Accent).
+			Render("⏣ " + m.activeSession)
+	}
+	titleLine := lipgloss.JoinHorizontal(lipgloss.Top,
+		title,
+		lipgloss.NewStyle().Width(m.width-lipgloss.Width(title)-lipgloss.Width(titleRight)-2).Render(""),
+		titleRight,
+	)
+
+	return lipgloss.JoinVertical(lipgloss.Left, titleLine, row)
+}
+
+func (m Model) renderStatusBar() string {
+	help := m.renderHelpItems()
+
+	// Right side: mode indicator
+	modeLabel := ""
+	switch m.activeTab {
+	case BrokersTab:
+		modeLabel = "BROKERS"
+	case TopicsTab:
+		modeLabel = "TOPICS"
+	case ConsumerGroupsTab:
+		modeLabel = "GROUPS"
+	case ACLsTab:
+		modeLabel = "ACLS"
+	}
+
+	right := statusBarModeStyle.Render(modeLabel)
+	leftWidth := m.width - lipgloss.Width(right) - 2
+	left := statusBarStyle.Width(leftWidth).Render(help)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+}
+
+func (m Model) renderHelpItems() string {
+	base := []string{
+		"tab", "switch",
+		"r", "refresh",
+		"s", "sessions",
+		"a", "AI",
+	}
+
+	var extra []string
+	switch m.activeTab {
+	case TopicsTab:
+		extra = []string{
+			"enter", "consume",
+			"p", "produce",
+			"C", "create",
+			"d", "delete",
+		}
+		if m.focusedPanel == 1 {
+			extra = append([]string{"e", "edit config"}, extra...)
+		}
+	case ACLsTab:
+		extra = []string{"C", "create"}
+		if len(m.acls) > 0 {
+			extra = append(extra, "e", "edit", "d", "delete")
+		}
+	}
+
+	all := append(base, extra...)
+	all = append(all, "q", "quit")
+	return renderHelpBar(all...)
 }
 
 func (m Model) renderBrokersView() string {
 	if len(m.brokers) == 0 {
-		return "No brokers found."
+		return labelStyle.Render("  No brokers found.")
 	}
-
-	borderStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240"))
 
 	// Calculate broker statistics
 	totalBrokers := len(m.brokers)
 	offlineBrokers := 0
-	controllerCount := 0
+	controllerID := -1
 
 	for _, broker := range m.brokers {
 		if broker.Status != "Online" {
 			offlineBrokers++
 		}
 		if broker.IsController {
-			controllerCount++
+			controllerID = int(broker.ID)
 		}
 	}
 
 	// Left panel: brokers table (70% width)
-	leftPanelWidth := int(float64(m.width-10) * 0.7)
-	leftPanel := borderStyle.
+	leftPanelWidth := int(float64(m.width-6) * 0.7)
+	leftPanel := activePanelStyle.
 		Width(leftPanelWidth).
 		Height(m.height - 12)
-
 	brokersTableView := leftPanel.Render(m.brokersTable.View())
 
-	// Right panel: broker info box (30% width)
-	rightPanelWidth := m.width - leftPanelWidth - 10
-
-	// Info box styling
-	infoBoxStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("205")).
+	// Right panel: cluster info (30% width)
+	rightPanelWidth := m.width - leftPanelWidth - 6
+	infoBox := panelStyle.
 		Padding(1, 2).
 		Width(rightPanelWidth).
-		Height(m.height - 10)
+		Height(m.height - 12)
 
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("205")).
-		MarginBottom(1)
-
-	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("246"))
-
-	valueStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("229"))
-
-	errorStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("196"))
-
-	successStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("46"))
-
-	// Build info content
-	var infoContent strings.Builder
-
-	infoContent.WriteString(titleStyle.Render("📊 Cluster Status"))
-	infoContent.WriteString("\n\n")
+	var sb strings.Builder
+	sb.WriteString(sectionTitleStyle.Render("Cluster Status"))
+	sb.WriteString("\n\n")
 
 	// Broker count
-	infoContent.WriteString(labelStyle.Render("Total Brokers: "))
-	infoContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", totalBrokers)))
-	infoContent.WriteString("\n\n")
+	sb.WriteString(labelStyle.Render("Brokers  "))
+	sb.WriteString(valueStyle.Render(fmt.Sprintf("%d", totalBrokers)))
+	sb.WriteString("\n")
 
-	// Online/Offline status
-	infoContent.WriteString(labelStyle.Render("Status: "))
+	// Status
+	sb.WriteString(labelStyle.Render("Health   "))
 	if offlineBrokers == 0 {
-		infoContent.WriteString(successStyle.Render(fmt.Sprintf("✅ All Online (%d)", totalBrokers)))
+		sb.WriteString(successStyle.Render(fmt.Sprintf("%d/%d online", totalBrokers, totalBrokers)))
 	} else {
-		onlineBrokers := totalBrokers - offlineBrokers
-		infoContent.WriteString("\n")
-		infoContent.WriteString(labelStyle.Render("  Online: "))
-		infoContent.WriteString(successStyle.Render(fmt.Sprintf("%d", onlineBrokers)))
-		infoContent.WriteString("\n")
-		infoContent.WriteString(labelStyle.Render("  Offline: "))
-		infoContent.WriteString(errorStyle.Render(fmt.Sprintf("%d", offlineBrokers)))
+		sb.WriteString(errorStyle.Render(fmt.Sprintf("%d offline", offlineBrokers)))
 	}
-	infoContent.WriteString("\n\n")
+	sb.WriteString("\n")
 
-	// Controller info
-	infoContent.WriteString(labelStyle.Render("Controller: "))
-	if controllerCount > 0 {
-		for _, broker := range m.brokers {
-			if broker.IsController {
-				infoContent.WriteString(valueStyle.Render(fmt.Sprintf("Node %d", broker.ID)))
-				break
-			}
-		}
+	// Controller
+	sb.WriteString(labelStyle.Render("Leader   "))
+	if controllerID >= 0 {
+		sb.WriteString(valueStyle.Render(fmt.Sprintf("node %d", controllerID)))
 	} else {
-		infoContent.WriteString(labelStyle.Render("None detected"))
+		sb.WriteString(warningStyle.Render("unknown"))
 	}
-	infoContent.WriteString("\n\n")
 
-	// Replica Status
-	infoContent.WriteString(titleStyle.Render("📈 Replica Status"))
-	infoContent.WriteString("\n\n")
+	sb.WriteString("\n\n")
+	sb.WriteString(sectionTitleStyle.Render("Partitions"))
+	sb.WriteString("\n\n")
 
-	// Use actual cluster stats if available
 	if m.clusterStats != nil {
-		infoContent.WriteString(labelStyle.Render("Total Partitions: "))
-		infoContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", m.clusterStats.TotalPartitions)))
-		infoContent.WriteString("\n\n")
+		sb.WriteString(labelStyle.Render("Total    "))
+		sb.WriteString(valueStyle.Render(fmt.Sprintf("%d", m.clusterStats.TotalPartitions)))
+		sb.WriteString("\n")
 
-		infoContent.WriteString(labelStyle.Render("Total Replicas: "))
-		infoContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", m.clusterStats.TotalReplicas)))
-		infoContent.WriteString("\n\n")
+		sb.WriteString(labelStyle.Render("Replicas "))
+		sb.WriteString(valueStyle.Render(fmt.Sprintf("%d", m.clusterStats.TotalReplicas)))
+		sb.WriteString("\n")
 
-		infoContent.WriteString(labelStyle.Render("Under-Replicated: "))
+		sb.WriteString(labelStyle.Render("Under-rep"))
 		if m.clusterStats.UnderReplicatedPartitions == 0 {
-			infoContent.WriteString(successStyle.Render("✅ None"))
+			sb.WriteString(successStyle.Render(" none"))
 		} else {
-			infoContent.WriteString(errorStyle.Render(fmt.Sprintf("⚠️  %d partitions", m.clusterStats.UnderReplicatedPartitions)))
+			sb.WriteString(errorStyle.Render(fmt.Sprintf(" %d", m.clusterStats.UnderReplicatedPartitions)))
 		}
 
 		if m.clusterStats.OfflinePartitions > 0 {
-			infoContent.WriteString("\n\n")
-			infoContent.WriteString(labelStyle.Render("Offline Partitions: "))
-			infoContent.WriteString(errorStyle.Render(fmt.Sprintf("❌ %d", m.clusterStats.OfflinePartitions)))
+			sb.WriteString("\n")
+			sb.WriteString(labelStyle.Render("Offline  "))
+			sb.WriteString(errorStyle.Render(fmt.Sprintf("%d", m.clusterStats.OfflinePartitions)))
 		}
 	} else {
-		// Fallback to basic calculation from topics
 		totalPartitions := 0
 		totalReplicas := 0
-
 		for _, topic := range m.topics {
 			totalPartitions += topic.Partitions
 			totalReplicas += topic.Partitions * topic.ReplicationFactor
 		}
-
-		infoContent.WriteString(labelStyle.Render("Total Partitions: "))
-		infoContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", totalPartitions)))
-		infoContent.WriteString("\n\n")
-
-		infoContent.WriteString(labelStyle.Render("Total Replicas: "))
-		infoContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", totalReplicas)))
-		infoContent.WriteString("\n")
-		infoContent.WriteString(labelStyle.Render("(Fetching detailed stats...)"))
+		sb.WriteString(labelStyle.Render("Total    "))
+		sb.WriteString(valueStyle.Render(fmt.Sprintf("%d", totalPartitions)))
+		sb.WriteString("\n")
+		sb.WriteString(labelStyle.Render("Replicas "))
+		sb.WriteString(valueStyle.Render(fmt.Sprintf("%d", totalReplicas)))
+		sb.WriteString("\n")
+		sb.WriteString(labelStyle.Render(m.spinner.View() + " fetching stats..."))
 	}
 
-	infoBoxView := infoBoxStyle.Render(infoContent.String())
+	infoBoxView := infoBox.Render(sb.String())
 
-	// Join left and right panels
-	return lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		brokersTableView,
-		"  ", // spacing
-		infoBoxView,
-	)
+	return lipgloss.JoinHorizontal(lipgloss.Top, brokersTableView, " ", infoBoxView)
 }
 
 func (m Model) renderTopicsView() string {
 	if len(m.topics) == 0 {
-		return "No topics found."
+		return labelStyle.Render("  No topics found.")
 	}
 
-	borderStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240"))
+	halfWidth := (m.width - 6) / 2
+	panelHeight := m.height - 12
 
 	// Left panel: topics list
-	leftPanel := borderStyle.
-		Width((m.width - 10) / 2).
-		Height(m.height - 12)
-
+	leftBorder := panelStyle
+	if m.focusedPanel == 0 {
+		leftBorder = activePanelStyle
+	}
+	leftPanel := leftBorder.Width(halfWidth).Height(panelHeight)
 	topicsView := leftPanel.Render(m.topicsTable.View())
 
 	// Right panel: topic config
-	rightPanel := borderStyle.
-		Width((m.width - 10) / 2).
-		Height(m.height - 12).
-		Padding(1)
+	rightBorder := panelStyle
+	if m.focusedPanel == 1 {
+		rightBorder = activePanelStyle
+	}
+	rightPanel := rightBorder.Width(halfWidth).Height(panelHeight).Padding(1)
 
 	var configView string
 	if m.loadingConfig {
-		configView = rightPanel.Render("Loading configuration...")
+		configView = rightPanel.Render(m.spinner.View() + "  Loading configuration...")
 	} else if m.topicConfig != nil {
 		configView = rightPanel.Render(m.renderTopicConfig())
 	} else {
-		configView = rightPanel.Render("Select a topic to view its configuration")
+		configView = rightPanel.Render(labelStyle.Render("Select a topic to view configuration"))
 	}
 
-	// Join panels horizontally
 	return lipgloss.JoinHorizontal(lipgloss.Top, topicsView, " ", configView)
 }
 
@@ -1295,23 +1339,14 @@ func (m Model) renderTopicConfig() string {
 
 	var sb strings.Builder
 
-	// Title
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("229"))
-
-	sb.WriteString(titleStyle.Render(fmt.Sprintf("📁 %s", m.topicConfig.Name)))
+	sb.WriteString(sectionTitleStyle.Render(m.topicConfig.Name))
 	sb.WriteString("\n")
-	sb.WriteString(strings.Repeat("─", 45))
-	sb.WriteString("\n\n")
 
-	// Basic info in a compact format
-	infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	sb.WriteString(infoStyle.Render(fmt.Sprintf("Partitions: %d | Replication: %d",
+	// Compact stats line
+	sb.WriteString(labelStyle.Render(fmt.Sprintf("partitions %d  replication %d",
 		m.topicConfig.Partitions, m.topicConfig.ReplicationFactor)))
 	sb.WriteString("\n\n")
 
-	// Render the Bubble Tea table
 	sb.WriteString(m.configTable.View())
 
 	return sb.String()
@@ -1370,77 +1405,40 @@ func (m Model) formatConfigValue(key, value string) string {
 
 func (m Model) renderConsumerGroupsView() string {
 	if m.loading {
-		return "\n  Loading consumer groups..."
+		return labelStyle.PaddingLeft(2).Render(m.spinner.View() + "  Loading consumer groups...")
 	}
 
 	if m.err != nil {
-		return fmt.Sprintf("\n  Error: %v", m.err)
+		return errorStyle.PaddingLeft(2).Render("Error: " + m.err.Error())
 	}
 
 	if len(m.consumerGroups) == 0 {
-		return "\n  No consumer groups found"
+		return labelStyle.PaddingLeft(2).Render("No consumer groups found")
 	}
 
-	return lipgloss.JoinVertical(
-		lipgloss.Top,
-		m.consumersTable.View(),
-	)
+	panel := activePanelStyle.
+		Width(m.width - 4).
+		Height(m.height - 12)
+
+	return panel.Render(m.consumersTable.View())
 }
 
 func (m Model) renderACLsView() string {
-	var sb strings.Builder
-
-	// Title with icon
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("205"))
-
-	sb.WriteString(titleStyle.Render("🔐 Access Control Lists (ACLs)"))
-	sb.WriteString("\n\n")
-
-	// Render ACL table
-	if m.aclTable != nil {
-		if len(m.acls) == 0 {
-			noDataStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("244")).
-				Italic(true)
-			sb.WriteString(noDataStyle.Render("No ACLs found. Press 'C' to create one or 'r' to refresh."))
-		} else {
-			sb.WriteString(m.aclTable.View())
-		}
-	} else {
-		sb.WriteString("Loading ACLs...")
+	if m.aclTable == nil {
+		return labelStyle.PaddingLeft(2).Render(m.spinner.View() + "  Loading ACLs...")
 	}
 
-	// Error display
-	if m.err != nil {
-		errorStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
-			MarginTop(1)
-		sb.WriteString("\n\n" + errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
+	if len(m.acls) == 0 {
+		empty := labelStyle.Render("No ACLs found. Press ") +
+			helpKeyStyle.Render("C") +
+			labelStyle.Render(" to create one.")
+		return lipgloss.NewStyle().PaddingLeft(2).PaddingTop(1).Render(empty)
 	}
 
-	return sb.String()
+	panel := activePanelStyle.
+		Width(m.width - 4).
+		Height(m.height - 12)
+
+	return panel.Render(m.aclTable.View())
 }
 
-func (m Model) getHelpText() string {
-	baseHelp := "→/←: Switch tabs | 1-4: Jump to tab | r: Refresh | A: AI Assistant | q: Quit"
-
-	switch m.activeTab {
-	case TopicsTab:
-		if m.topicConfig != nil {
-			if m.focusedPanel == 1 {
-				return baseHelp + " | Tab: Switch panel | e: Edit Config | Enter: Consume | P: Produce | D: Delete Topic"
-			}
-			return baseHelp + " | Tab: Switch panel | Enter: Consume | P: Produce | C: Create Topic | D: Delete Topic"
-		}
-		return baseHelp + " | Enter: Consume | P: Produce | C: Create Topic | D: Delete Topic"
-	case ACLsTab:
-		if len(m.acls) > 0 {
-			return baseHelp + " | C: Create ACL | e: Edit ACL | D: Delete ACL"
-		}
-		return baseHelp + " | C: Create ACL"
-	default:
-		return baseHelp
-	}
-}

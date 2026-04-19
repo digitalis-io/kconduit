@@ -450,23 +450,14 @@ func (m *ConsumerModel) updateTable() {
 		}
 		msg := m.messages[idx]
 
-		// Check if this is a search result for highlighting
-		isSearchResult := false
-		for _, sIdx := range m.searchResults {
-			if sIdx == idx {
-				isSearchResult = true
-				break
-			}
-		}
-
-		row := m.formatMessageRow(msg, idx+1, isSearchResult)
+		row := m.formatMessageRow(msg, idx+1)
 		m.tableRows = append(m.tableRows, row)
 	}
 
 	m.messageTable.SetRows(m.tableRows)
 }
 
-func (m *ConsumerModel) formatMessageRow(msg kafka.Message, num int, isSearchResult bool) table.Row {
+func (m *ConsumerModel) formatMessageRow(msg kafka.Message, num int) table.Row {
 	// Format timestamp
 	timestamp := msg.Timestamp.Format("2006-01-02 15:04:05")
 
@@ -493,85 +484,55 @@ func (m *ConsumerModel) formatMessageRow(msg kafka.Message, num int, isSearchRes
 func (m ConsumerModel) viewOffsetDialog() string {
 	var sb strings.Builder
 
-	// Calculate dialog width based on terminal width
-	boxWidth := 90
+	boxWidth := 70
 	if m.width > 0 && boxWidth > m.width-4 {
 		boxWidth = m.width - 4
 	}
-	// Dialog style
-	dialogStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("86")).
-		Padding(2, 4).
-		Width(boxWidth)
 
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("229")).
-		MarginBottom(1)
+	dlg := dialogBoxStyle.Width(boxWidth).Padding(2, 4)
 
-	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("86"))
-
-	selectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("46")).
-		Bold(true)
-
-	sb.WriteString(titleStyle.Render("📍 Select Consumer Start Position"))
+	sb.WriteString(sectionTitleStyle.Render("Start Position"))
+	sb.WriteString("\n\n")
+	sb.WriteString(labelStyle.Render("Choose where to start consuming:"))
 	sb.WriteString("\n\n")
 
-	sb.WriteString("Choose where to start consuming messages from:\n\n")
-
-	// Offset options
 	options := []struct {
 		option OffsetOption
 		label  string
 		desc   string
 	}{
-		{OffsetOldest, "Oldest", "Start from the beginning of the topic"},
-		{OffsetNewest, "Latest", "Start from new messages only"},
-		{OffsetSpecific, "Specific Offset", "Start from a specific offset number"},
+		{OffsetOldest, "Oldest", "from the beginning"},
+		{OffsetNewest, "Latest", "new messages only"},
+		{OffsetSpecific, "Specific", "from a given offset"},
 	}
+
+	selStyle := successStyle.Bold(true)
 
 	for _, opt := range options {
 		prefix := "  "
 		style := labelStyle
 		if m.offsetOption == opt.option {
 			prefix = "▶ "
-			style = selectedStyle
+			style = selStyle
 		}
-		sb.WriteString(style.Render(fmt.Sprintf("%s%s", prefix, opt.label)))
-		sb.WriteString(fmt.Sprintf(" - %s\n", opt.desc))
+		sb.WriteString(style.Render(prefix+opt.label) + " " + helpDescStyle.Render(opt.desc) + "\n")
 
-		// Show input field if this option is selected
-		if m.offsetOption == opt.option {
-			if opt.option == OffsetSpecific {
-				sb.WriteString("    ")
-				sb.WriteString(m.offsetInput.View())
-				sb.WriteString("\n")
-			}
+		if m.offsetOption == opt.option && opt.option == OffsetSpecific {
+			sb.WriteString("    ")
+			sb.WriteString(m.offsetInput.View())
+			sb.WriteString("\n")
 		}
 	}
 
 	sb.WriteString("\n")
 
-	// Error display
 	if m.err != nil {
-		errorStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196"))
-		sb.WriteString(errorStyle.Render(fmt.Sprintf("❌ %v\n\n", m.err)))
+		sb.WriteString(errorStyle.Render(m.err.Error()) + "\n\n")
 	}
 
-	// Help text with examples
-	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		Italic(true)
+	sb.WriteString(renderHelpBar("↑↓", "navigate", "enter", "start", "esc", "cancel"))
 
-	helpText := "↑/↓ or Tab: Navigate | Enter: Start | Esc: Cancel"
-	sb.WriteString(helpStyle.Render(helpText))
-
-	// Center the dialog
-	content := dialogStyle.Render(sb.String())
+	content := dlg.Render(sb.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
@@ -583,122 +544,80 @@ func (m ConsumerModel) View() string {
 	var sb strings.Builder
 
 	// Header
-	headerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
-		Padding(0, 1)
-
-	sb.WriteString(headerStyle.Render("📨 Kafka Consumer"))
+	sb.WriteString(appHeaderStyle.Render("Consumer"))
+	sb.WriteString("  ")
+	sb.WriteString(valueStyle.Render(m.topic))
 	sb.WriteString("\n\n")
 
 	// Show search bar if in search mode
 	if m.mode == ModeSearch {
-		searchStyle := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("220"))
-		sb.WriteString(searchStyle.Render("🔍 Search: "))
+		sb.WriteString(warningStyle.Bold(true).Render("Search: "))
 		sb.WriteString(m.searchInput.View())
 		sb.WriteString("\n\n")
 	}
 
-	// Topic Information Table
-	tableStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("86")).
-		Padding(1, 2)
-
-	labelStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("86"))
-
-	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("229"))
-
-	var tableContent strings.Builder
-	tableContent.WriteString(labelStyle.Render("📋 Topic Details") + "\n")
-	tableContent.WriteString(strings.Repeat("─", 60) + "\n\n")
-
-	tableContent.WriteString(labelStyle.Render("Topic Name:       "))
-	tableContent.WriteString(valueStyle.Render(m.topic) + "\n")
-
+	// Compact topic info panel
+	var info strings.Builder
+	info.WriteString(labelStyle.Render("Topic    ") + valueStyle.Render(m.topic) + "\n")
 	if m.topicInfo != nil {
-		tableContent.WriteString(labelStyle.Render("Partitions:       "))
-		tableContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", m.topicInfo.Partitions)) + "\n")
-
-		tableContent.WriteString(labelStyle.Render("Replication:      "))
-		tableContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", m.topicInfo.ReplicationFactor)) + "\n")
+		info.WriteString(labelStyle.Render("Parts    ") + valueStyle.Render(fmt.Sprintf("%d", m.topicInfo.Partitions)))
+		info.WriteString(labelStyle.Render("  Replicas ") + valueStyle.Render(fmt.Sprintf("%d", m.topicInfo.ReplicationFactor)) + "\n")
 	}
+	info.WriteString(labelStyle.Render("Messages ") + valueStyle.Render(fmt.Sprintf("%d", len(m.messages))))
+	info.WriteString(labelStyle.Render("  Bytes ") + valueStyle.Render(formatBytes(m.totalBytes)) + "\n")
 
-	tableContent.WriteString(labelStyle.Render("Messages Received:"))
-	tableContent.WriteString(valueStyle.Render(fmt.Sprintf(" %d", len(m.messages))) + "\n")
-
-	tableContent.WriteString(labelStyle.Render("Total Bytes:      "))
-	tableContent.WriteString(valueStyle.Render(formatBytes(m.totalBytes)) + "\n")
-
-	tableContent.WriteString(labelStyle.Render("Start Offset:     "))
 	offsetText := "Latest"
 	if m.startOffset == sarama.OffsetOldest {
 		offsetText = "Oldest"
 	} else if m.startOffset >= 0 {
 		offsetText = fmt.Sprintf("%d", m.startOffset)
 	}
-	tableContent.WriteString(valueStyle.Render(offsetText) + "\n")
+	info.WriteString(labelStyle.Render("Offset   ") + valueStyle.Render(offsetText))
 
 	if m.searchTerm != "" {
-		tableContent.WriteString(labelStyle.Render("Search Results:   "))
-		tableContent.WriteString(valueStyle.Render(fmt.Sprintf("%d matches", len(m.searchResults))) + "\n")
+		info.WriteString(labelStyle.Render("  Matches ") + valueStyle.Render(fmt.Sprintf("%d", len(m.searchResults))))
 	}
+	info.WriteString("\n")
 
-	tableContent.WriteString(labelStyle.Render("Status:           "))
+	info.WriteString(labelStyle.Render("Status   "))
 	if m.err != nil {
-		tableContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("❌ Error"))
+		info.WriteString(errorStyle.Render("error"))
 	} else if !m.consuming {
-		tableContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render("⏸️  Paused"))
+		info.WriteString(warningStyle.Render("paused"))
 	} else if len(m.messages) == 0 {
-		tableContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render("⏳ Waiting"))
+		info.WriteString(warningStyle.Render("waiting"))
 	} else {
-		tableContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("46")).Render("✅ Consuming"))
+		info.WriteString(successStyle.Render("consuming"))
 	}
 
-	sb.WriteString(tableStyle.Render(tableContent.String()))
+	sb.WriteString(panelStyle.Padding(1, 2).Render(info.String()))
 	sb.WriteString("\n")
 
-	// Error message
 	if m.err != nil {
-		errorStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
-			Bold(true)
-		sb.WriteString(errorStyle.Render(fmt.Sprintf("❌ Error: %v\n", m.err)))
+		sb.WriteString(errorStyle.Bold(true).Render("Error: "+m.err.Error()) + "\n")
 	}
 
 	// Message table
 	if len(m.messages) == 0 && !m.consuming {
-		// Show a placeholder when not consuming
-		emptyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241")).
-			Italic(true).
-			Padding(2, 0)
-		sb.WriteString(emptyStyle.Render("No messages to display. Start consuming to see messages."))
+		sb.WriteString(labelStyle.PaddingTop(1).Render("No messages. Start consuming to see messages."))
 	} else {
-		// Render the message table
 		sb.WriteString(m.messageTable.View())
 	}
 	sb.WriteString("\n")
 
-	// Footer with help text
-	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		Italic(true)
-
-	footer := "↑/↓: Navigate | /: Search | n/N: Next/Prev | f: Filter | p: Pause | c: Clear | q: Back"
+	// Footer
+	prefix := ""
 	if m.searchTerm != "" && len(m.searchResults) > 0 {
-		footer = fmt.Sprintf("[Match %d/%d] ", m.currentMatch+1, len(m.searchResults)) + footer
+		prefix = fmt.Sprintf("[%d/%d] ", m.currentMatch+1, len(m.searchResults))
 	}
 	if m.showFiltered {
-		footer = "[FILTERED] " + footer
+		prefix += "[FILTERED] "
 	}
-	sb.WriteString(helpStyle.Render(footer))
+	help := renderHelpBar("↑↓", "navigate", "/", "search", "n/N", "next/prev", "f", "filter", "p", "pause", "c", "clear", "q", "back")
+	if prefix != "" {
+		sb.WriteString(warningStyle.Render(prefix))
+	}
+	sb.WriteString(help)
 
 	return sb.String()
 }

@@ -140,7 +140,7 @@ func NewAIAssistantModel(client *kafka.Client, aiEngine string, aiModel string) 
 		OpenAIKey:      getEnv("OPENAI_API_KEY", ""),
 		OpenAIModel:    getEnv("OPENAI_MODEL", "gpt-3.5-turbo"),
 		GeminiKey:      getEnv("GEMINI_API_KEY", ""),
-		GeminiModel:    getEnv("GEMINI_MODEL", "gemini-1.5-pro-latest"),
+		GeminiModel:    getEnv("GEMINI_MODEL", "gemini-3.1-pro-preview"),
 		AnthropicKey:   getEnv("ANTHROPIC_API_KEY", ""),
 		AnthropicModel: getEnv("ANTHROPIC_MODEL", "claude-3-haiku-20240307"),
 		OllamaURL:      getEnv("OLLAMA_URL", "http://localhost:11434"),
@@ -351,92 +351,62 @@ func (m AIAssistantModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m AIAssistantModel) View() string {
 	var s strings.Builder
 
-	// Title
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
-		Padding(0, 1)
-
 	providerText := m.getProviderName()
 	modelText := m.getCurrentModel()
-	title := titleStyle.Render("🤖 AI Assistant")
-	s.WriteString(title)
+
+	s.WriteString(appHeaderStyle.Render("AI Assistant"))
+	s.WriteString("  ")
+	s.WriteString(labelStyle.Render(providerText))
+	s.WriteString(helpDescStyle.Render(" / "))
+	s.WriteString(labelStyle.Render(modelText))
 	s.WriteString("\n\n")
 
-	// Provider information box - use dynamic width based on window size
+	// Provider info panel
+	apiKeyStatus := m.getAPIKeyStatus()
+	var statusLine string
+	if apiKeyStatus == "Configured" {
+		statusLine = successStyle.Render("ready")
+	} else {
+		statusLine = warningStyle.Render(apiKeyStatus)
+	}
+
 	boxWidth := m.width - 10
 	if boxWidth > 100 {
-		boxWidth = 100 // Cap max width
+		boxWidth = 100
 	}
 	if boxWidth < 60 {
-		boxWidth = 60 // Min width
+		boxWidth = 60
 	}
 
-	providerStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("86")).
-		Padding(0, 1).
-		Width(boxWidth)
+	info := labelStyle.Render("Provider ") + valueStyle.Render(providerText) +
+		labelStyle.Render("  Model ") + valueStyle.Render(modelText) +
+		labelStyle.Render("  API ") + statusLine
 
-	// Check if API key is configured
-	apiKeyStatus := m.getAPIKeyStatus()
-	statusIcon := "✅"
-	statusColor := lipgloss.Color("46") // green
-	if apiKeyStatus != "Configured" {
-		statusIcon = "⚠️"
-		statusColor = lipgloss.Color("214") // orange
-	}
-
-	providerInfo := lipgloss.NewStyle().Foreground(statusColor).Render(
-		fmt.Sprintf("%s Provider: %s\n   Model: %s\n   Status: %s",
-			statusIcon, providerText, modelText, apiKeyStatus))
-
-	s.WriteString(providerStyle.Render(providerInfo))
+	s.WriteString(panelStyle.Padding(0, 2).Width(boxWidth).Render(info))
 	s.WriteString("\n\n")
 
 	// Show input or response
 	if m.showResponse {
-		responseStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252")).
-			Bold(true)
-		s.WriteString(responseStyle.Render("📝 Response:"))
+		s.WriteString(sectionTitleStyle.Render("Response"))
 
-		// Add scroll indicators if needed
 		if m.viewport.TotalLineCount() > m.viewport.Height {
-			scrollInfo := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("240")).
-				Render(fmt.Sprintf(" (Line %d/%d - Use ↑/↓ or PgUp/PgDn to scroll)",
-					m.viewport.YOffset+1,
-					m.viewport.TotalLineCount()))
-			s.WriteString(scrollInfo)
+			s.WriteString("  ")
+			s.WriteString(helpDescStyle.Render(fmt.Sprintf("line %d/%d",
+				m.viewport.YOffset+1, m.viewport.TotalLineCount())))
 		}
 		s.WriteString("\n\n")
-
-		// Show the viewport with the response
 		s.WriteString(m.viewport.View())
 		s.WriteString("\n\n")
-
-		helpStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241"))
-		s.WriteString(helpStyle.Render("Press ESC to enter a new query, or Ctrl+C to exit"))
+		s.WriteString(renderHelpBar("esc", "new query", "ctrl+c", "exit"))
 	} else {
 		s.WriteString(m.textarea.View())
 		s.WriteString("\n\n")
 
 		if m.processing {
-			processingStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("220")).
-				Bold(true)
-			s.WriteString(processingStyle.Render("🔄 Processing your request..."))
+			s.WriteString(warningStyle.Bold(true).Render("Processing..."))
 		} else {
-			// Help text with better formatting
-			helpStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("241"))
-
-			availableProviders := m.getAvailableProviders()
-			helpText := fmt.Sprintf("Enter: Send | Tab: Switch provider (%s) | ESC: Exit", availableProviders)
-			s.WriteString(helpStyle.Render(helpText))
+			available := m.getAvailableProviders()
+			s.WriteString(renderHelpBar("enter", "send", "tab", "provider ("+available+")", "esc", "exit"))
 		}
 	}
 
@@ -626,9 +596,18 @@ func (m *AIAssistantModel) queryOpenAI(query string) (string, error) {
 		return "", fmt.Errorf("unexpected API response format")
 	}
 
-	firstChoice := choices[0].(map[string]interface{})
-	message := firstChoice["message"].(map[string]interface{})
-	content := message["content"].(string)
+	firstChoice, ok := choices[0].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("unexpected OpenAI response: invalid choice structure")
+	}
+	message, ok := firstChoice["message"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("unexpected OpenAI response: invalid message structure")
+	}
+	content, ok := message["content"].(string)
+	if !ok {
+		return "", fmt.Errorf("unexpected OpenAI response: content is not a string")
+	}
 
 	return content, nil
 }
@@ -640,8 +619,8 @@ func (m *AIAssistantModel) queryGemini(query string) (string, error) {
 
 	fullPrompt := aiSystemPrompt + "\n\nUser: " + query
 
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
-		m.config.GeminiModel, m.config.GeminiKey)
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent",
+		m.config.GeminiModel)
 
 	requestBody := map[string]interface{}{
 		"contents": []map[string]interface{}{
@@ -668,6 +647,7 @@ func (m *AIAssistantModel) queryGemini(query string) (string, error) {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", m.config.GeminiKey)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -701,7 +681,10 @@ func (m *AIAssistantModel) queryGemini(query string) (string, error) {
 		return "", fmt.Errorf("unexpected Gemini API response format")
 	}
 
-	firstCandidate := candidates[0].(map[string]interface{})
+	firstCandidate, ok := candidates[0].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("unexpected Gemini response: invalid candidate structure")
+	}
 	content, ok := firstCandidate["content"].(map[string]interface{})
 	if !ok {
 		return "", fmt.Errorf("unexpected Gemini response structure")
@@ -712,7 +695,10 @@ func (m *AIAssistantModel) queryGemini(query string) (string, error) {
 		return "", fmt.Errorf("no content parts in Gemini response")
 	}
 
-	firstPart := parts[0].(map[string]interface{})
+	firstPart, ok := parts[0].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("unexpected Gemini response: invalid part structure")
+	}
 	text, ok := firstPart["text"].(string)
 	if !ok {
 		return "", fmt.Errorf("no text in Gemini response part")
@@ -782,7 +768,10 @@ func (m *AIAssistantModel) queryAnthropic(query string) (string, error) {
 		return "", fmt.Errorf("unexpected Anthropic API response format")
 	}
 
-	firstContent := content[0].(map[string]interface{})
+	firstContent, ok := content[0].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("unexpected Anthropic response: invalid content structure")
+	}
 	text, ok := firstContent["text"].(string)
 	if !ok {
 		return "", fmt.Errorf("no text in Anthropic response")
@@ -1208,9 +1197,9 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 				// Format response
 				var response strings.Builder
 				if len(successes) > 0 {
-					response.WriteString(fmt.Sprintf("✅ Successfully updated %d topic(s):\n", len(successes)))
+					fmt.Fprintf(&response, "✅ Successfully updated %d topic(s):\n", len(successes))
 					for _, s := range successes {
-						response.WriteString(fmt.Sprintf("  • %s\n", s))
+						fmt.Fprintf(&response, "  • %s\n", s)
 					}
 				}
 
@@ -1218,14 +1207,14 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 					if len(successes) > 0 {
 						response.WriteString("\n")
 					}
-					response.WriteString(fmt.Sprintf("❌ Failed to update %d topic(s):\n", len(failures)))
+					fmt.Fprintf(&response, "❌ Failed to update %d topic(s):\n", len(failures))
 					for _, f := range failures {
-						response.WriteString(fmt.Sprintf("  • %s\n", f))
+						fmt.Fprintf(&response, "  • %s\n", f)
 					}
 				}
 
 				if len(successes) == 0 && len(failures) == 0 {
-					response.WriteString(fmt.Sprintf("ℹ️ All topics already have %d or more partitions", int(partitions)))
+					fmt.Fprintf(&response, "ℹ️ All topics already have %d or more partitions", int(partitions))
 				}
 
 				return AIResponseMsg{
@@ -1311,12 +1300,12 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 				// Format response
 				var response strings.Builder
 				if matchedCount == 0 {
-					response.WriteString(fmt.Sprintf("ℹ️ No topics found matching pattern '%s'\n", pattern))
+					fmt.Fprintf(&response, "ℹ️ No topics found matching pattern '%s'\n", pattern)
 				} else {
 					if len(topicResults) > 0 {
-						response.WriteString(fmt.Sprintf("✅ Successfully updated configuration for %d topic(s) matching '%s':\n", len(topicResults), pattern))
+						fmt.Fprintf(&response, "✅ Successfully updated configuration for %d topic(s) matching '%s':\n", len(topicResults), pattern)
 						for _, result := range topicResults {
-							response.WriteString(fmt.Sprintf("  • %s\n", result))
+							fmt.Fprintf(&response, "  • %s\n", result)
 						}
 					}
 
@@ -1324,9 +1313,9 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 						if len(topicResults) > 0 {
 							response.WriteString("\n")
 						}
-						response.WriteString(fmt.Sprintf("❌ Failed to update configuration for %d topic(s):\n", len(topicErrors)))
+						fmt.Fprintf(&response, "❌ Failed to update configuration for %d topic(s):\n", len(topicErrors))
 						for _, err := range topicErrors {
-							response.WriteString(fmt.Sprintf("  • %s\n", err))
+							fmt.Fprintf(&response, "  • %s\n", err)
 						}
 					}
 				}
@@ -1382,9 +1371,9 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 				// Format response
 				var response strings.Builder
 				if len(topicResults) > 0 {
-					response.WriteString(fmt.Sprintf("✅ Successfully updated configuration for %d topic(s):\n", len(topicResults)))
+					fmt.Fprintf(&response, "✅ Successfully updated configuration for %d topic(s):\n", len(topicResults))
 					for _, result := range topicResults {
-						response.WriteString(fmt.Sprintf("  • %s\n", result))
+						fmt.Fprintf(&response, "  • %s\n", result)
 					}
 				}
 
@@ -1392,9 +1381,9 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 					if len(topicResults) > 0 {
 						response.WriteString("\n")
 					}
-					response.WriteString(fmt.Sprintf("❌ Failed to update configuration for %d topic(s):\n", len(topicErrors)))
+					fmt.Fprintf(&response, "❌ Failed to update configuration for %d topic(s):\n", len(topicErrors))
 					for _, err := range topicErrors {
-						response.WriteString(fmt.Sprintf("  • %s\n", err))
+						fmt.Fprintf(&response, "  • %s\n", err)
 					}
 				}
 
@@ -1458,19 +1447,19 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 			}
 
 			var responseText strings.Builder
-			responseText.WriteString(fmt.Sprintf("Found %d consumer group(s):\n\n", len(filteredGroups)))
+			fmt.Fprintf(&responseText, "Found %d consumer group(s):\n\n", len(filteredGroups))
 
 			for _, group := range filteredGroups {
-				responseText.WriteString(fmt.Sprintf("📊 Group: %s\n", group.GroupID))
-				responseText.WriteString(fmt.Sprintf("   • State: %s\n", group.State))
-				responseText.WriteString(fmt.Sprintf("   • Members: %d\n", group.NumMembers))
-				responseText.WriteString(fmt.Sprintf("   • Topics: %d\n", group.NumTopics))
-				responseText.WriteString(fmt.Sprintf("   • Total Lag: %d\n", group.ConsumerLag))
+				fmt.Fprintf(&responseText, "📊 Group: %s\n", group.GroupID)
+				fmt.Fprintf(&responseText, "   • State: %s\n", group.State)
+				fmt.Fprintf(&responseText, "   • Members: %d\n", group.NumMembers)
+				fmt.Fprintf(&responseText, "   • Topics: %d\n", group.NumTopics)
+				fmt.Fprintf(&responseText, "   • Total Lag: %d\n", group.ConsumerLag)
 				if len(group.Topics) > 0 && len(group.Topics) <= 5 {
-					responseText.WriteString(fmt.Sprintf("   • Consuming: %s\n", strings.Join(group.Topics, ", ")))
+					fmt.Fprintf(&responseText, "   • Consuming: %s\n", strings.Join(group.Topics, ", "))
 				} else if len(group.Topics) > 5 {
-					responseText.WriteString(fmt.Sprintf("   • Consuming: %s, ... (%d total)\n",
-						strings.Join(group.Topics[:5], ", "), len(group.Topics)))
+					fmt.Fprintf(&responseText, "   • Consuming: %s, ... (%d total)\n",
+						strings.Join(group.Topics[:5], ", "), len(group.Topics))
 				}
 				responseText.WriteString("\n")
 			}
@@ -1551,12 +1540,12 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 			}
 
 			var responseText strings.Builder
-			responseText.WriteString(fmt.Sprintf("Found %d topic(s) matching criteria:\n\n", len(filteredTopics)))
+			fmt.Fprintf(&responseText, "Found %d topic(s) matching criteria:\n\n", len(filteredTopics))
 
 			for _, topic := range filteredTopics {
-				responseText.WriteString(fmt.Sprintf("📋 Topic: %s\n", topic.Name))
-				responseText.WriteString(fmt.Sprintf("   • Partitions: %d\n", topic.Partitions))
-				responseText.WriteString(fmt.Sprintf("   • Replication Factor: %d\n", topic.ReplicationFactor))
+				fmt.Fprintf(&responseText, "📋 Topic: %s\n", topic.Name)
+				fmt.Fprintf(&responseText, "   • Partitions: %d\n", topic.Partitions)
+				fmt.Fprintf(&responseText, "   • Replication Factor: %d\n", topic.ReplicationFactor)
 
 				// Get compression info if requested
 				if _, hasCompressionFilter := filter["compression"]; hasCompressionFilter {
@@ -1566,7 +1555,7 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 						if compressionType == "" || compressionType == "producer" {
 							responseText.WriteString("   • Compression: none (using producer default)\n")
 						} else {
-							responseText.WriteString(fmt.Sprintf("   • Compression: %s\n", compressionType))
+							fmt.Fprintf(&responseText, "   • Compression: %s\n", compressionType)
 						}
 					}
 				}
@@ -1650,15 +1639,15 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 
 				var responseText strings.Builder
 				if len(created) > 0 {
-					responseText.WriteString(fmt.Sprintf("✅ Successfully created %d ACL(s):\n", len(created)))
+					fmt.Fprintf(&responseText, "✅ Successfully created %d ACL(s):\n", len(created))
 					for _, c := range created {
-						responseText.WriteString(fmt.Sprintf("  • %s\n", c))
+						fmt.Fprintf(&responseText, "  • %s\n", c)
 					}
 				}
 				if len(errors) > 0 {
-					responseText.WriteString(fmt.Sprintf("\n❌ Failed to create %d ACL(s):\n", len(errors)))
+					fmt.Fprintf(&responseText, "\n❌ Failed to create %d ACL(s):\n", len(errors))
 					for _, e := range errors {
-						responseText.WriteString(fmt.Sprintf("  • %s\n", e))
+						fmt.Fprintf(&responseText, "  • %s\n", e)
 					}
 				}
 
@@ -1759,7 +1748,7 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 			if len(filteredACLs) == 0 {
 				responseText.WriteString("No ACLs found matching the criteria.")
 			} else {
-				responseText.WriteString(fmt.Sprintf("Found %d ACL(s):\n\n", len(filteredACLs)))
+				fmt.Fprintf(&responseText, "Found %d ACL(s):\n\n", len(filteredACLs))
 
 				// Group ACLs by resource for better readability
 				resourceMap := make(map[string][]kafka.ACL)
@@ -1770,10 +1759,10 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 
 				for resource, aclList := range resourceMap {
 					parts := strings.Split(resource, ":")
-					responseText.WriteString(fmt.Sprintf("📋 %s: %s\n", parts[0], parts[1]))
+					fmt.Fprintf(&responseText, "📋 %s: %s\n", parts[0], parts[1])
 					for _, acl := range aclList {
-						responseText.WriteString(fmt.Sprintf("  • %s → %s %s (from %s)\n", 
-							acl.Principal, acl.Operation, acl.PermissionType, acl.Host))
+						fmt.Fprintf(&responseText, "  • %s → %s %s (from %s)\n",
+							acl.Principal, acl.Operation, acl.PermissionType, acl.Host)
 					}
 					responseText.WriteString("\n")
 				}

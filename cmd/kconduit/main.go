@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/digitalis-io/kconduit/pkg/config"
 	"github.com/digitalis-io/kconduit/pkg/kafka"
 	"github.com/digitalis-io/kconduit/pkg/logger"
 	"github.com/digitalis-io/kconduit/pkg/ui"
@@ -30,6 +31,8 @@ var (
 	cfgTlsClientCert string
 	cfgTlsClientKey  string
 	cfgTlsSkipVerify bool
+	cfgSession       string
+	cfgSaveSession   string
 )
 
 // These variables are set via ldflags during build
@@ -43,17 +46,53 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "kconduit",
 		Short: "Kconduit TUI for Kafka",
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			// Handle version flag
-			if viper.GetBool("version") {
-				fmt.Printf("kconduit version %s\n", Version)
-				fmt.Printf("  Build Time: %s\n", BuildTime)
-				fmt.Printf("  Git Commit: %s\n", GitCommit)
-				os.Exit(0)
-			}
-			return nil
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Handle --list-sessions
+			if cmd.Flags().Changed("list-sessions") {
+				names, err := config.List()
+				if err != nil {
+					return fmt.Errorf("failed to list sessions: %w", err)
+				}
+				if len(names) == 0 {
+					fmt.Println("No saved sessions.")
+					return nil
+				}
+				for _, n := range names {
+					fmt.Println(n)
+				}
+				return nil
+			}
+
+			// Apply saved session defaults before reading flags (CLI flags take precedence)
+			if cfgSession != "" {
+				sess, err := config.Load(cfgSession)
+				if err != nil {
+					return fmt.Errorf("failed to load session %q: %w", cfgSession, err)
+				}
+				applySessionDefaults(cmd, sess)
+			}
+
+			// If no --brokers or --session flag provided, run the startup session picker
+			var activeSession string
+			if !cmd.Flags().Changed("brokers") && cfgSession == "" && cfgSaveSession == "" && !cmd.Flags().Changed("list-sessions") {
+				sc, err := ui.RunSessionPicker()
+				if err != nil {
+					return fmt.Errorf("session picker error: %w", err)
+				}
+				if sc == nil {
+					// User quit the picker
+					return nil
+				}
+				// Apply session values as Viper defaults (CLI flags still take precedence)
+				applySessionDefaults(cmd, &sc.Session)
+				if sc.Password != "" {
+					viper.SetDefault("sasl_password", sc.Password)
+				}
+				activeSession = sc.Name
+			} else {
+				activeSession = cfgSession
+			}
+
 			// Merge Viper and flags
 			brokers := viper.GetString("brokers")
 			logLevel := viper.GetString("log_level")
@@ -70,8 +109,37 @@ func main() {
 			tlsClientCert := viper.GetString("tls_client_cert")
 			tlsClientKey := viper.GetString("tls_client_key")
 			tlsSkipVerify := viper.GetBool("tls_skip_verify")
-			// Version flag is handled before RunE, so this code path won't be reached
-			// when --version is used
+
+			// Handle --save-session: persist current config and exit
+			if cfgSaveSession != "" {
+				if cfgSaslPassword != "" {
+					fmt.Fprintln(os.Stderr, "WARNING: passwords are not saved in session config; use KCONDUIT_SASL_PASSWORD env var")
+				}
+				sess := config.Session{
+					Brokers:  brokers,
+					LogLevel: logLevel,
+					AIEngine: aiEngine,
+					AIModel:  aiModel,
+					SASL: config.SessionSASL{
+						Enabled:   saslEnabled,
+						Mechanism: saslMechanism,
+						Username:  saslUsername,
+						Protocol:  saslProtocol,
+					},
+					TLS: config.SessionTLS{
+						Enabled:    tlsEnabled,
+						CACert:     tlsCACert,
+						ClientCert: tlsClientCert,
+						ClientKey:  tlsClientKey,
+						SkipVerify: tlsSkipVerify,
+					},
+				}
+				if err := config.Save(cfgSaveSession, sess); err != nil {
+					return fmt.Errorf("failed to save session: %w", err)
+				}
+				fmt.Printf("Session %q saved to %s\n", cfgSaveSession, config.ConfigPath())
+				return nil
+			}
 
 			// Initialize logger
 			if err := logger.Init(logLevel, logFile); err != nil {
@@ -120,7 +188,7 @@ func main() {
 			}()
 
 			// Run UI
-			model := ui.NewModel(client, aiEngine, aiModel)
+			model := ui.NewModel(client, aiEngine, aiModel, activeSession)
 			p := tea.NewProgram(model, tea.WithAltScreen())
 			if _, err := p.Run(); err != nil {
 				return fmt.Errorf("error running program: %v", err)
@@ -130,18 +198,28 @@ func main() {
 		},
 	}
 
+	// Set version using Cobra's built-in version support
+	rootCmd.Version = Version
+	rootCmd.SetVersionTemplate(fmt.Sprintf("kconduit version %s\n  Build Time: %s\n  Git Commit: %s\n", Version, BuildTime, GitCommit))
+
 	// Define flags
 	rootCmd.Flags().StringVarP(&cfgBrokers, "brokers", "b", "localhost:9092", "Comma-separated list of Kafka broker addresses")
 	rootCmd.Flags().StringVar(&cfgLogLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	rootCmd.Flags().StringVar(&cfgLogFile, "log-file", "", "Log file path (if empty, logs to stderr)")
 	rootCmd.Flags().StringVar(&cfgAiEngine, "ai-engine", "gemini", "AI engine to use (e.g., openai)")
-	rootCmd.Flags().StringVar(&cfgAiModel, "ai-model", "gemini-1.5-pro-latest", "AI model to use (e.g., gpt-3.5-turbo, gpt-4)")
+	rootCmd.Flags().StringVar(&cfgAiModel, "ai-model", "gemini-3.1-pro-preview", "AI model to use (e.g., gpt-3.5-turbo, gpt-4)")
+
+	// Session management flags
+	rootCmd.Flags().StringVar(&cfgSession, "session", "", "Load a saved connection session by name")
+	rootCmd.Flags().StringVar(&cfgSaveSession, "save-session", "", "Save current connection config as a named session and exit")
+	rootCmd.Flags().Bool("list-sessions", false, "List all saved connection sessions and exit")
 
 	// SASL authentication flags
 	rootCmd.Flags().BoolVar(&cfgSaslEnabled, "sasl", false, "Enable SASL authentication")
 	rootCmd.Flags().StringVar(&cfgSaslMechanism, "sasl-mechanism", "PLAIN", "SASL mechanism (PLAIN, SCRAM-SHA-256, SCRAM-SHA-512)")
 	rootCmd.Flags().StringVar(&cfgSaslUsername, "sasl-username", "", "SASL username")
-	rootCmd.Flags().StringVar(&cfgSaslPassword, "sasl-password", "", "SASL password")
+	rootCmd.Flags().StringVar(&cfgSaslPassword, "sasl-password", "", "SASL password (deprecated: use KCONDUIT_SASL_PASSWORD env var instead)")
+	_ = rootCmd.Flags().MarkDeprecated("sasl-password", "use the KCONDUIT_SASL_PASSWORD environment variable instead")
 	rootCmd.Flags().StringVar(&cfgSaslProtocol, "sasl-protocol", "SASL_PLAINTEXT", "Security protocol (SASL_PLAINTEXT, SASL_SSL)")
 
 	// TLS/SSL flags
@@ -150,9 +228,6 @@ func main() {
 	rootCmd.Flags().StringVar(&cfgTlsClientCert, "tls-client-cert", "", "Path to client certificate file")
 	rootCmd.Flags().StringVar(&cfgTlsClientKey, "tls-client-key", "", "Path to client key file")
 	rootCmd.Flags().BoolVar(&cfgTlsSkipVerify, "tls-skip-verify", false, "Skip TLS certificate verification (insecure)")
-
-	// Version flag
-	rootCmd.Flags().BoolP("version", "v", false, "Print version information and exit")
 
 	// Bind Viper to flags
 	_ = viper.BindPFlag("brokers", rootCmd.Flags().Lookup("brokers"))
@@ -170,7 +245,6 @@ func main() {
 	_ = viper.BindPFlag("tls_client_cert", rootCmd.Flags().Lookup("tls-client-cert"))
 	_ = viper.BindPFlag("tls_client_key", rootCmd.Flags().Lookup("tls-client-key"))
 	_ = viper.BindPFlag("tls_skip_verify", rootCmd.Flags().Lookup("tls-skip-verify"))
-	_ = viper.BindPFlag("version", rootCmd.Flags().Lookup("version"))
 
 	// Environment variable support
 	viper.SetEnvPrefix("KCONDUIT") // e.g. KCONDUIT_BROKERS
@@ -179,5 +253,54 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
+	}
+}
+
+// applySessionDefaults sets Viper defaults from a loaded session.
+// Only applies values that were not explicitly set via CLI flags.
+func applySessionDefaults(cmd *cobra.Command, sess *config.Session) {
+	if sess.Brokers != "" && !cmd.Flags().Changed("brokers") {
+		viper.SetDefault("brokers", sess.Brokers)
+	}
+	if sess.LogLevel != "" && !cmd.Flags().Changed("log-level") {
+		viper.SetDefault("log_level", sess.LogLevel)
+	}
+	if sess.AIEngine != "" && !cmd.Flags().Changed("ai-engine") {
+		viper.SetDefault("ai_engine", sess.AIEngine)
+	}
+	if sess.AIModel != "" && !cmd.Flags().Changed("ai-model") {
+		viper.SetDefault("ai_model", sess.AIModel)
+	}
+	if sess.SASL.Enabled && !cmd.Flags().Changed("sasl") {
+		viper.SetDefault("sasl_enabled", true)
+		if sess.SASL.Mechanism != "" && !cmd.Flags().Changed("sasl-mechanism") {
+			viper.SetDefault("sasl_mechanism", sess.SASL.Mechanism)
+		}
+		if sess.SASL.Username != "" && !cmd.Flags().Changed("sasl-username") {
+			viper.SetDefault("sasl_username", sess.SASL.Username)
+		}
+		if sess.SASL.Protocol != "" && !cmd.Flags().Changed("sasl-protocol") {
+			viper.SetDefault("sasl_protocol", sess.SASL.Protocol)
+		}
+		if sess.SASL.PasswordFile != "" && !cmd.Flags().Changed("sasl-password") {
+			if pw, err := os.ReadFile(sess.SASL.PasswordFile); err == nil {
+				viper.SetDefault("sasl_password", strings.TrimSpace(string(pw)))
+			}
+		}
+	}
+	if sess.TLS.Enabled && !cmd.Flags().Changed("tls") {
+		viper.SetDefault("tls_enabled", true)
+		if sess.TLS.CACert != "" && !cmd.Flags().Changed("tls-ca-cert") {
+			viper.SetDefault("tls_ca_cert", sess.TLS.CACert)
+		}
+		if sess.TLS.ClientCert != "" && !cmd.Flags().Changed("tls-client-cert") {
+			viper.SetDefault("tls_client_cert", sess.TLS.ClientCert)
+		}
+		if sess.TLS.ClientKey != "" && !cmd.Flags().Changed("tls-client-key") {
+			viper.SetDefault("tls_client_key", sess.TLS.ClientKey)
+		}
+		if sess.TLS.SkipVerify && !cmd.Flags().Changed("tls-skip-verify") {
+			viper.SetDefault("tls_skip_verify", true)
+		}
 	}
 }

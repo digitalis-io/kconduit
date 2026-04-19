@@ -153,8 +153,8 @@ func (m DeleteTopicModel) View() string {
 		Foreground(lipgloss.Color("229")).
 		Bold(true)
 	
-	s.WriteString(fmt.Sprintf("You are about to delete topic: %s\n\n", 
-		topicStyle.Render(m.topicToDelete)))
+	fmt.Fprintf(&s, "You are about to delete topic: %s\n\n",
+		topicStyle.Render(m.topicToDelete))
 
 	// Confirmation prompt
 	s.WriteString("Type the topic name to confirm:\n")

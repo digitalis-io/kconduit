@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 type ProducerModel struct {
@@ -153,97 +152,53 @@ func (m ProducerModel) View() string {
 	var sb strings.Builder
 
 	// Header
-	headerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
-		Padding(0, 1)
-
-	sb.WriteString(headerStyle.Render("📝 Kafka Producer"))
+	sb.WriteString(appHeaderStyle.Render("Producer"))
+	sb.WriteString("  ")
+	sb.WriteString(valueStyle.Render(m.topic))
 	sb.WriteString("\n\n")
 
-	// Topic Information Table
-	tableStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("86")).
-		Padding(1, 2)
-
-	labelStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("86"))
-
-	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("229"))
-
-	var tableContent strings.Builder
-	tableContent.WriteString(labelStyle.Render("📋 Topic Details") + "\n")
-	tableContent.WriteString(strings.Repeat("─", 60) + "\n\n")
-	
-	tableContent.WriteString(labelStyle.Render("Topic Name:       "))
-	tableContent.WriteString(valueStyle.Render(m.topic) + "\n")
-	
+	// Topic info panel
+	var infoContent strings.Builder
+	infoContent.WriteString(labelStyle.Render("Topic      ") + valueStyle.Render(m.topic) + "\n")
 	if m.topicInfo != nil {
-		tableContent.WriteString(labelStyle.Render("Partitions:       "))
-		tableContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", m.topicInfo.Partitions)) + "\n")
-		
-		tableContent.WriteString(labelStyle.Render("Replication:      "))
-		tableContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", m.topicInfo.ReplicationFactor)) + "\n")
+		infoContent.WriteString(labelStyle.Render("Partitions ") + valueStyle.Render(fmt.Sprintf("%d", m.topicInfo.Partitions)) + "\n")
+		infoContent.WriteString(labelStyle.Render("Replicas   ") + valueStyle.Render(fmt.Sprintf("%d", m.topicInfo.ReplicationFactor)) + "\n")
 	}
-	
-	tableContent.WriteString(labelStyle.Render("Messages Sent:    "))
-	tableContent.WriteString(valueStyle.Render(fmt.Sprintf("%d", m.msgCount)) + "\n")
-	
-	tableContent.WriteString(labelStyle.Render("Status:           "))
+	infoContent.WriteString(labelStyle.Render("Sent       ") + valueStyle.Render(fmt.Sprintf("%d", m.msgCount)) + "\n")
+	infoContent.WriteString(labelStyle.Render("Status     "))
 	if m.err != nil {
-		tableContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("❌ Error"))
+		infoContent.WriteString(errorStyle.Render("error"))
 	} else if m.successMsg != "" {
-		tableContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("46")).Render("✅ Ready"))
+		infoContent.WriteString(successStyle.Render("ready"))
 	} else {
-		tableContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render("🔄 Composing"))
+		infoContent.WriteString(warningStyle.Render("composing"))
 	}
 
-	sb.WriteString(tableStyle.Render(tableContent.String()))
+	sb.WriteString(panelStyle.Padding(1, 2).Render(infoContent.String()))
 	sb.WriteString("\n\n")
 
-	// Input Fields
-	inputHeaderStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("86"))
-
-	sb.WriteString(inputHeaderStyle.Render("📨 Message Composer"))
+	// Input fields
+	sb.WriteString(sectionTitleStyle.Render("Message"))
 	sb.WriteString("\n\n")
 
-	sb.WriteString(labelStyle.Render("Key:") + "\n")
+	sb.WriteString(labelStyle.Render("Key") + "\n")
 	sb.WriteString(m.keyInput.View())
 	sb.WriteString("\n\n")
 
-	sb.WriteString(labelStyle.Render("Value:") + "\n")
+	sb.WriteString(labelStyle.Render("Value") + "\n")
 	sb.WriteString(m.valueInput.View())
 	sb.WriteString("\n\n")
 
-	// Status Messages
+	// Status
 	if m.err != nil {
-		errorStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
-			Bold(true)
-		sb.WriteString(errorStyle.Render(fmt.Sprintf("❌ Error: %v", m.err)))
-		sb.WriteString("\n")
+		sb.WriteString(errorStyle.Bold(true).Render("Error: "+m.err.Error()) + "\n")
 	}
-
 	if m.successMsg != "" {
-		successStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("46")).
-			Bold(true)
-		sb.WriteString(successStyle.Render(m.successMsg))
-		sb.WriteString("\n")
+		sb.WriteString(successStyle.Bold(true).Render(m.successMsg) + "\n")
 	}
 
-	// Help text
 	sb.WriteString("\n")
-	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		Italic(true)
-	sb.WriteString(helpStyle.Render("Tab: Switch fields • Ctrl+S: Send message • Esc: Back to topics"))
+	sb.WriteString(renderHelpBar("tab", "switch fields", "ctrl+s", "send", "esc", "back"))
 
 	return sb.String()
 }

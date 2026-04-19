@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -22,6 +24,7 @@ type Client struct {
 	config            *sarama.Config
 	admin             sarama.ClusterAdmin
 	producer          sarama.SyncProducer
+	mu                sync.RWMutex
 	topics            []TopicInfo
 	topicsLastFetched time.Time
 }
@@ -104,11 +107,15 @@ func NewClientWithAuth(brokers []string, saslConfig *SASLConfig, tlsConfig *TLSC
 		
 		// Create TLS configuration
 		tlsConf := &tls.Config{
+			MinVersion:         tls.VersionTLS12,
 			InsecureSkipVerify: false,
 		}
-		
+
 		// Apply provided TLS config if available
 		if tlsConfig != nil {
+			if tlsConfig.InsecureSkipVerify {
+				log.Warn("TLS certificate verification is DISABLED — connections are vulnerable to MITM attacks")
+			}
 			tlsConf.InsecureSkipVerify = tlsConfig.InsecureSkipVerify
 			
 			// Load CA certificate if provided
@@ -185,10 +192,16 @@ func (c *Client) ListTopics() ([]string, error) {
 }
 
 func (c *Client) GetTopicDetails() ([]TopicInfo, error) {
+	// Fast path: return cached topics under read lock
+	c.mu.RLock()
 	if c.topicsLastFetched.Add(topicCacheDuration).After(time.Now()) && len(c.topics) > 0 {
-		return c.topics, nil
+		topics := c.topics
+		c.mu.RUnlock()
+		return topics, nil
 	}
+	c.mu.RUnlock()
 
+	// Slow path: fetch from Kafka (no lock held during network call)
 	metadata, err := c.admin.ListTopics()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list topics: %w", err)
@@ -209,10 +222,13 @@ func (c *Client) GetTopicDetails() ([]TopicInfo, error) {
 		return topicInfos[i].Name < topicInfos[j].Name
 	})
 
-	// Cache topics
+	// Write the result back to the cache under write lock
+	c.mu.Lock()
 	c.topics = topicInfos
+	c.topicsLastFetched = time.Now()
+	c.mu.Unlock()
 
-	return c.topics, nil
+	return topicInfos, nil
 }
 
 func (c *Client) GetTopicConfig(topicName string) (*TopicConfig, error) {
@@ -888,8 +904,10 @@ func (c *Client) GetConsumerGroups() ([]ConsumerGroupInfo, error) {
 		offsets, err := c.admin.ListConsumerGroupOffsets(groupID, nil)
 		if err == nil && offsets != nil {
 			for topic := range offsets.Blocks {
-				topicSet[topic] = struct{}{}
-				info.Topics = append(info.Topics, topic)
+				if _, exists := topicSet[topic]; !exists {
+					topicSet[topic] = struct{}{}
+					info.Topics = append(info.Topics, topic)
+				}
 			}
 		}
 		info.NumTopics = len(topicSet)
@@ -1001,7 +1019,7 @@ func (c *Client) Close() error {
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf("errors closing client: %v", errs)
+		return errors.Join(errs...)
 	}
 	return nil
 }

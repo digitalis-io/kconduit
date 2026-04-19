@@ -216,7 +216,7 @@ test-ai-openai: build
 test-ai-gemini: build
 	@test -n "$$GEMINI_API_KEY" || (echo "$(RED)Error: GEMINI_API_KEY not set$(NC)" && exit 1)
 	@echo "$(GREEN)Testing with Gemini...$(NC)"
-	./$(BINARY_NAME) -b localhost:19092 --ai-engine gemini --ai-model gemini-1.5-pro-latest
+	./$(BINARY_NAME) -b localhost:19092 --ai-engine gemini --ai-model gemini-3.1-pro-preview
 
 ## test-ai-ollama: Test with Ollama (requires ollama to be running)
 .PHONY: test-ai-ollama
