@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/digitalis-io/kconduit/pkg/kafka"
-	"github.com/digitalis-io/kconduit/pkg/logger"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/digitalis-io/kconduit/pkg/kafka"
+	"github.com/digitalis-io/kconduit/pkg/logger"
 )
 
 type AIProvider int
@@ -835,27 +835,27 @@ func (m *AIAssistantModel) queryOllama(query string) (string, error) {
 
 func (m *AIAssistantModel) executeMultipleCommands(commands []map[string]interface{}) tea.Cmd {
 	log := logger.Get()
-	
+
 	return func() tea.Msg {
 		var responses []string
-		
+
 		for i, command := range commands {
 			action, ok := command["action"].(string)
 			if !ok {
 				continue
 			}
-			
+
 			log.WithField("action", action).WithField("step", i+1).Info("Executing command")
-			
+
 			// Execute each command synchronously
 			var result string
 			var err error
-			
+
 			switch action {
 			case "modify_partitions":
 				topic, _ := command["topic"].(string)
 				partitions, _ := command["partitions"].(float64)
-				
+
 				if topic != "" && partitions > 0 {
 					err = m.client.ModifyTopicPartitions(topic, int32(partitions))
 					if err != nil {
@@ -864,15 +864,15 @@ func (m *AIAssistantModel) executeMultipleCommands(commands []map[string]interfa
 						result = fmt.Sprintf("✅ Successfully increased partitions for '%s' to %d", topic, int(partitions))
 					}
 				}
-				
+
 			case "modify_config":
 				topic, _ := command["topic"].(string)
 				configs, _ := command["configs"].(map[string]interface{})
-				
+
 				if topic != "" && configs != nil {
 					var configChanges []string
 					var configErrors []string
-					
+
 					for key, value := range configs {
 						if strValue, ok := value.(string); ok {
 							if err := m.client.UpdateTopicConfig(topic, key, strValue); err != nil {
@@ -882,27 +882,27 @@ func (m *AIAssistantModel) executeMultipleCommands(commands []map[string]interfa
 							}
 						}
 					}
-					
+
 					if len(configErrors) > 0 {
-						result = fmt.Sprintf("⚠️ Partially updated '%s'. Success: %s, Failed: %s", 
+						result = fmt.Sprintf("⚠️ Partially updated '%s'. Success: %s, Failed: %s",
 							topic, strings.Join(configChanges, ", "), strings.Join(configErrors, ", "))
 					} else if len(configChanges) > 0 {
 						result = fmt.Sprintf("✅ Successfully updated '%s': %s", topic, strings.Join(configChanges, ", "))
 					}
 				}
-				
+
 			case "create_topic":
 				name, _ := command["name"].(string)
 				partitions, _ := command["partitions"].(float64)
 				replicationFactor, _ := command["replication_factor"].(float64)
-				
+
 				if name != "" {
 					err = m.client.CreateTopic(name, int32(partitions), int16(replicationFactor))
 					if err != nil {
 						result = fmt.Sprintf("❌ Failed to create topic %s: %v", name, err)
 					} else {
 						result = fmt.Sprintf("✅ Successfully created topic '%s'", name)
-						
+
 						// Apply configs if any
 						if configs, ok := command["configs"].(map[string]interface{}); ok {
 							for key, value := range configs {
@@ -916,7 +916,7 @@ func (m *AIAssistantModel) executeMultipleCommands(commands []map[string]interfa
 						}
 					}
 				}
-				
+
 			case "create_acl":
 				principal, _ := command["principal"].(string)
 				host, _ := command["host"].(string)
@@ -925,7 +925,7 @@ func (m *AIAssistantModel) executeMultipleCommands(commands []map[string]interfa
 				patternType, _ := command["pattern_type"].(string)
 				operation, _ := command["operation"].(string)
 				permissionType, _ := command["permission_type"].(string)
-				
+
 				if principal != "" && resourceType != "" && resourceName != "" {
 					acl := kafka.ACL{
 						Principal:      principal,
@@ -936,16 +936,16 @@ func (m *AIAssistantModel) executeMultipleCommands(commands []map[string]interfa
 						Operation:      operation,
 						PermissionType: permissionType,
 					}
-					
+
 					err = m.client.CreateACL(acl)
 					if err != nil {
 						result = fmt.Sprintf("❌ Failed to create ACL: %v", err)
 					} else {
-						result = fmt.Sprintf("✅ Created ACL: %s on %s %s (%s %s)", 
+						result = fmt.Sprintf("✅ Created ACL: %s on %s %s (%s %s)",
 							principal, resourceType, resourceName, operation, permissionType)
 					}
 				}
-				
+
 			case "delete_acl":
 				principal, _ := command["principal"].(string)
 				host, _ := command["host"].(string)
@@ -954,7 +954,7 @@ func (m *AIAssistantModel) executeMultipleCommands(commands []map[string]interfa
 				patternType, _ := command["pattern_type"].(string)
 				operation, _ := command["operation"].(string)
 				permissionType, _ := command["permission_type"].(string)
-				
+
 				if principal != "" && resourceType != "" && resourceName != "" {
 					acl := kafka.ACL{
 						Principal:      principal,
@@ -965,28 +965,28 @@ func (m *AIAssistantModel) executeMultipleCommands(commands []map[string]interfa
 						Operation:      operation,
 						PermissionType: permissionType,
 					}
-					
+
 					err = m.client.DeleteACL(acl)
 					if err != nil {
 						result = fmt.Sprintf("❌ Failed to delete ACL: %v", err)
 					} else {
-						result = fmt.Sprintf("✅ Deleted ACL: %s on %s %s (%s %s)", 
+						result = fmt.Sprintf("✅ Deleted ACL: %s on %s %s (%s %s)",
 							principal, resourceType, resourceName, operation, permissionType)
 					}
 				}
 			}
-			
+
 			if result != "" {
 				responses = append(responses, fmt.Sprintf("Step %d: %s", i+1, result))
 			}
 		}
-		
+
 		// Combine all responses
 		finalResponse := strings.Join(responses, "\n")
 		if finalResponse == "" {
 			finalResponse = "No actions were executed"
 		}
-		
+
 		return AIResponseMsg{
 			response: finalResponse,
 			err:      nil,
@@ -1272,7 +1272,7 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 					if !matchFunc(topic.Name) {
 						continue
 					}
-					
+
 					matchedCount++
 					var configChanges []string
 					var configErrors []string
@@ -1607,7 +1607,7 @@ func (m *AIAssistantModel) parseAndExecuteCommand(response string) tea.Cmd {
 
 	case "create_acls":
 		aclsData, _ := command["acls"].([]interface{})
-		
+
 		if len(aclsData) > 0 {
 			return func() tea.Msg {
 				var created []string

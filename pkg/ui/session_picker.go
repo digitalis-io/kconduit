@@ -3,11 +3,11 @@ package ui
 import (
 	"fmt"
 
-	"github.com/digitalis-io/kconduit/pkg/config"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/digitalis-io/kconduit/pkg/config"
 )
 
 // SessionConnect holds the result of a session selection — the session config
@@ -22,8 +22,8 @@ type pickerState int
 
 const (
 	pickerStateList     pickerState = iota
-	pickerStateForm                  // creating a new session
-	pickerStatePassword              // password prompt before connect
+	pickerStateForm                 // creating a new session
+	pickerStatePassword             // password prompt before connect
 )
 
 // SessionPickerModel is a standalone Bubble Tea program shown at startup

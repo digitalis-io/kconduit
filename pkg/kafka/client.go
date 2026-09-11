@@ -104,7 +104,7 @@ func NewClientWithAuth(brokers []string, saslConfig *SASLConfig, tlsConfig *TLSC
 	if tlsConfig != nil && tlsConfig.Enabled || (saslConfig != nil && strings.ToUpper(saslConfig.Protocol) == "SASL_SSL") {
 		log.Info("Configuring TLS/SSL")
 		config.Net.TLS.Enable = true
-		
+
 		// Create TLS configuration
 		tlsConf := &tls.Config{
 			MinVersion:         tls.VersionTLS12,
@@ -117,7 +117,7 @@ func NewClientWithAuth(brokers []string, saslConfig *SASLConfig, tlsConfig *TLSC
 				log.Warn("TLS certificate verification is DISABLED — connections are vulnerable to MITM attacks")
 			}
 			tlsConf.InsecureSkipVerify = tlsConfig.InsecureSkipVerify
-			
+
 			// Load CA certificate if provided
 			if tlsConfig.CACert != "" {
 				log.WithField("ca_cert", tlsConfig.CACert).Debug("Loading CA certificate")
@@ -125,21 +125,21 @@ func NewClientWithAuth(brokers []string, saslConfig *SASLConfig, tlsConfig *TLSC
 				if err != nil {
 					return nil, fmt.Errorf("failed to read CA certificate: %w", err)
 				}
-				
+
 				caCertPool := x509.NewCertPool()
 				if !caCertPool.AppendCertsFromPEM(caCert) {
 					return nil, fmt.Errorf("failed to parse CA certificate")
 				}
 				tlsConf.RootCAs = caCertPool
 			}
-			
+
 			// Load client certificate and key if provided
 			if tlsConfig.ClientCert != "" && tlsConfig.ClientKey != "" {
 				log.WithFields(map[string]interface{}{
 					"client_cert": tlsConfig.ClientCert,
 					"client_key":  tlsConfig.ClientKey,
 				}).Debug("Loading client certificate and key")
-				
+
 				cert, err := tls.LoadX509KeyPair(tlsConfig.ClientCert, tlsConfig.ClientKey)
 				if err != nil {
 					return nil, fmt.Errorf("failed to load client certificate: %w", err)
@@ -147,7 +147,7 @@ func NewClientWithAuth(brokers []string, saslConfig *SASLConfig, tlsConfig *TLSC
 				tlsConf.Certificates = []tls.Certificate{cert}
 			}
 		}
-		
+
 		config.Net.TLS.Config = tlsConf
 	}
 
@@ -401,7 +401,7 @@ func (c *Client) GetBrokers() ([]BrokerInfo, error) {
 // GetClusterStats retrieves cluster-wide partition and replication statistics
 func (c *Client) GetClusterStats() (*ClusterStats, error) {
 	log := logger.Get()
-	
+
 	// Get controller for metadata request
 	controller, err := c.admin.Controller()
 	if err != nil {
@@ -412,46 +412,46 @@ func (c *Client) GetClusterStats() (*ClusterStats, error) {
 			log.WithError(err).Warn("Failed to close controller connection")
 		}
 	}()
-	
+
 	// Get metadata for all topics
 	request := &sarama.MetadataRequest{}
 	metadata, err := controller.GetMetadata(request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get metadata: %w", err)
 	}
-	
+
 	stats := &ClusterStats{}
-	
+
 	// Iterate through all topics and their partitions
 	for _, topic := range metadata.Topics {
 		// Skip internal topics
 		if strings.HasPrefix(topic.Name, "__") {
 			continue
 		}
-		
+
 		for _, partition := range topic.Partitions {
 			stats.TotalPartitions++
 			stats.TotalReplicas += len(partition.Replicas)
-			
+
 			// Check if partition is under-replicated
 			if len(partition.Isr) < len(partition.Replicas) {
 				stats.UnderReplicatedPartitions++
 			}
-			
+
 			// Check if partition is offline (no leader)
 			if partition.Leader < 0 {
 				stats.OfflinePartitions++
 			}
 		}
 	}
-	
+
 	log.WithFields(map[string]interface{}{
 		"totalPartitions": stats.TotalPartitions,
-		"totalReplicas": stats.TotalReplicas,
+		"totalReplicas":   stats.TotalReplicas,
 		"underReplicated": stats.UnderReplicatedPartitions,
-		"offline": stats.OfflinePartitions,
+		"offline":         stats.OfflinePartitions,
 	}).Debug("Cluster statistics retrieved")
-	
+
 	return stats, nil
 }
 
@@ -684,20 +684,20 @@ func parseTimeToMilliseconds(value string) string {
 	if _, err := strconv.ParseInt(value, 10, 64); err == nil {
 		return value
 	}
-	
+
 	// Try parsing as Go duration (handles h, m, s, ms, us, ns)
 	if duration, err := time.ParseDuration(value); err == nil {
 		milliseconds := duration.Milliseconds()
 		return strconv.FormatInt(milliseconds, 10)
 	}
-	
+
 	// Handle day and week formats manually
 	value = strings.TrimSpace(strings.ToLower(value))
-	
+
 	// Extract number and unit
 	var number float64
 	var unit string
-	
+
 	for i, r := range value {
 		if (r < '0' || r > '9') && r != '.' {
 			numberStr := value[:i]
@@ -710,11 +710,11 @@ func parseTimeToMilliseconds(value string) string {
 			break
 		}
 	}
-	
+
 	if number == 0 {
 		return value // No valid number found
 	}
-	
+
 	// Convert based on unit
 	var milliseconds int64
 	switch strings.TrimSpace(unit) {
@@ -725,7 +725,7 @@ func parseTimeToMilliseconds(value string) string {
 	default:
 		return value // Unknown unit, return original
 	}
-	
+
 	return strconv.FormatInt(milliseconds, 10)
 }
 
@@ -737,27 +737,27 @@ func (c *Client) UpdateTopicConfig(topicName string, configKey string, configVal
 		log.WithError(err).Error("Invalid parameters for UpdateTopicConfig")
 		return err
 	}
-	
+
 	// Convert human-readable time formats for time-based configs
 	timeBasedConfigs := map[string]bool{
-		"retention.ms":           true,
-		"segment.ms":            true,
-		"flush.ms":              true,
-		"delete.retention.ms":   true,
-		"file.delete.delay.ms":  true,
-		"log.roll.ms":           true,
-		"max.compaction.lag.ms": true,
-		"min.compaction.lag.ms": true,
+		"retention.ms":                        true,
+		"segment.ms":                          true,
+		"flush.ms":                            true,
+		"delete.retention.ms":                 true,
+		"file.delete.delay.ms":                true,
+		"log.roll.ms":                         true,
+		"max.compaction.lag.ms":               true,
+		"min.compaction.lag.ms":               true,
 		"message.timestamp.difference.max.ms": true,
 	}
-	
+
 	originalValue := configValue
 	if timeBasedConfigs[configKey] {
 		configValue = parseTimeToMilliseconds(configValue)
 		if originalValue != configValue {
 			log.WithFields(map[string]interface{}{
-				"key":           configKey,
-				"originalValue": originalValue,
+				"key":            configKey,
+				"originalValue":  originalValue,
 				"convertedValue": configValue,
 			}).Info("Converted time format to milliseconds")
 		}
@@ -1080,10 +1080,10 @@ type ConsumerGroupInfo struct {
 
 // ClusterStats represents cluster-wide statistics
 type ClusterStats struct {
-	TotalPartitions     int
-	TotalReplicas       int
+	TotalPartitions           int
+	TotalReplicas             int
 	UnderReplicatedPartitions int
-	OfflinePartitions   int
+	OfflinePartitions         int
 }
 
 // ACL represents a Kafka ACL entry
@@ -1214,11 +1214,11 @@ func (c *Client) DeleteACL(acl ACL) error {
 	log := logger.Get()
 	log.WithFields(map[string]interface{}{
 		"principal":      acl.Principal,
-		"host":          acl.Host,
-		"resourceType":  acl.ResourceType,
-		"resourceName":  acl.ResourceName,
-		"patternType":   acl.PatternType,
-		"operation":     acl.Operation,
+		"host":           acl.Host,
+		"resourceType":   acl.ResourceType,
+		"resourceName":   acl.ResourceName,
+		"patternType":    acl.PatternType,
+		"operation":      acl.Operation,
 		"permissionType": acl.PermissionType,
 	}).Info("Attempting to delete ACL with filter")
 
@@ -1231,13 +1231,13 @@ func (c *Client) DeleteACL(acl ACL) error {
 		Operation:                 parseOperation(acl.Operation),
 		PermissionType:            parsePermissionType(acl.PermissionType),
 	}
-	
+
 	// Log the parsed filter values for debugging
 	log.WithFields(map[string]interface{}{
-		"filter.ResourceType":    filter.ResourceType,
-		"filter.ResourceName":    *filter.ResourceName,
-		"filter.PatternType":     filter.ResourcePatternTypeFilter,
-		"filter.Principal":       *filter.Principal,
+		"filter.ResourceType":   filter.ResourceType,
+		"filter.ResourceName":   *filter.ResourceName,
+		"filter.PatternType":    filter.ResourcePatternTypeFilter,
+		"filter.Principal":      *filter.Principal,
 		"filter.Host":           *filter.Host,
 		"filter.Operation":      filter.Operation,
 		"filter.PermissionType": filter.PermissionType,
@@ -1253,14 +1253,14 @@ func (c *Client) DeleteACL(acl ACL) error {
 		// Try with a less specific filter if no matches found
 		// Some Kafka versions might have issues with exact pattern type matching
 		log.Debug("No matches with exact filter, trying with Any pattern type")
-		
+
 		filter.ResourcePatternTypeFilter = sarama.AclPatternAny
 		matches, err = c.admin.DeleteACL(filter, false)
 		if err != nil {
 			log.WithError(err).Error("Failed to delete ACL with Any pattern")
 			return fmt.Errorf("failed to delete ACL: %w", err)
 		}
-		
+
 		if len(matches) == 0 {
 			return fmt.Errorf("no matching ACLs found to delete")
 		}
@@ -1319,7 +1319,7 @@ func getPatternTypeName(t sarama.AclResourcePatternType) string {
 func parsePatternType(s string) sarama.AclResourcePatternType {
 	log := logger.Get()
 	log.WithField("input", s).Debug("Parsing pattern type")
-	
+
 	switch s {
 	case "Literal":
 		return sarama.AclPatternLiteral

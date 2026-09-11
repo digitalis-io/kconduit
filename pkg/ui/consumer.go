@@ -47,10 +47,10 @@ type ConsumerModel struct {
 	consuming    bool
 	totalBytes   int64
 	// New fields for offset control
-	mode           ConsumerMode
-	offsetOption   OffsetOption
-	offsetInput    textinput.Model
-	startOffset    int64
+	mode         ConsumerMode
+	offsetOption OffsetOption
+	offsetInput  textinput.Model
+	startOffset  int64
 	// New fields for search
 	searchInput     textinput.Model
 	searchTerm      string
@@ -479,7 +479,6 @@ func (m *ConsumerModel) formatMessageRow(msg kafka.Message, num int) table.Row {
 		sizeStr,
 	}
 }
-
 
 func (m ConsumerModel) viewOffsetDialog() string {
 	var sb strings.Builder
