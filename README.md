@@ -19,8 +19,12 @@
 - 🎯 **Topic Management** - Create, configure, and delete Kafka topics with safety confirmations
 - 📨 **Message Operations** - Produce and consume Kafka messages with formatted display
 - ⚙️ **Configuration Editor** - View and modify topic configurations in real-time
-- 👥 **Consumer Group Monitoring** - Track consumer groups with lag calculation
-- 🔄 **Auto-Refresh** - Real-time updates of cluster state
+- 👥 **Consumer Group Monitoring** - Track consumer groups with lag calculation, and drill into per-partition lag
+- 📈 **Topic Metrics** - Message counts and on-disk size per topic, alongside partitions and replication factor
+- 🔍 **Filter and Sort** - Narrow any table with `/` and re-order it by any column
+- 🔄 **Auto-Refresh** - Toggle a live 5-second refresh of the current tab with `Ctrl+R`
+- 📋 **Clipboard** - Copy the selected row, or a config value, with `y`
+- ❓ **Built-in Help** - Press `?` for the full keyboard reference without leaving the app
 
 ### AI Assistant for Kafka
 - 🤖 **Natural Language Commands** - Manage Kafka using plain English instead of CLI flags
@@ -154,10 +158,21 @@ You can also open the Session Manager interactively at any time by pressing `s` 
 ### Global Navigation
 - `Tab` / `Shift+Tab` - Cycle forward/backward through tabs (Brokers, Topics, Consumer Groups, ACLs)
 - `1-4` - Jump directly to a tab by number
+- `↑/↓` - Move the selection
+- `g` / `G` - Jump to the first or last row
+- `/` - Filter the current table; `Enter` keeps the filter, `Esc` clears it
+- `<` / `>` - Step the sort order (each column has an ascending and a descending place)
+- `y` - Copy the selected row to the clipboard
 - `r` / `R` - Refresh current view
+- `Ctrl+R` - Toggle auto-refresh of the current tab (every 5 seconds)
+- `?` / `F1` - Open the keyboard reference
 - `A` / `a` - Open AI Assistant
 - `s` / `S` - Open Session Manager
+- `Esc` - Close an overlay, or clear the current filter
 - `q` or `Ctrl+C` - Quit application
+
+### Brokers Tab
+- `Enter` - Show full detail for the selected broker (address, role, rack, API version, listeners, log directories)
 
 ### Topics Tab
 - `↑/↓` - Navigate through topics
@@ -167,6 +182,18 @@ You can also open the Session Manager interactively at any time by pressing `s` 
 - `C` - Create new topic
 - `D` - Delete selected topic (with confirmation)
 - `e` - Edit topic configuration
+- `y` - Copy the selected config value when the configuration panel is focused
+
+The topic table shows message count and on-disk size per topic. Both are
+measured after the list appears — they show `…` until they arrive. Message count
+is the number of records currently retained, not everything ever produced. Disk
+size is the total across every replica, so a 1 GiB topic with replication factor
+3 reports 3 GiB.
+
+### Consumer Groups Tab
+- `↑/↓` - Navigate through consumer groups
+- `Enter` - Break the group's lag down by partition (committed offset, log end offset, lag, owning member)
+- `/`, `<` / `>`, `g` / `G`, `y` - Filter, sort, jump, and copy, as in every other table
 
 ### Consumer Mode
 - `↑/↓` or `PgUp/PgDn` - Scroll through messages
@@ -287,7 +314,7 @@ Press `A` from any screen to open the AI assistant. For full provider setup and 
 ## 🏗️ Building & Development
 
 ### Requirements
-- Go 1.24+
+- Go 1.27+
 - Access to a Kafka cluster
 
 ### Build Commands

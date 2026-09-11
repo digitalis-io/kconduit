@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/digitalis-io/kconduit/pkg/kafka"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/digitalis-io/kconduit/pkg/kafka"
 )
 
 type EditACLHuhModel struct {
@@ -263,10 +263,13 @@ func (m EditACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.success = true
-		return m, tea.Batch(
-			tea.Println("✅ ACL(s) updated successfully!"),
-			func() tea.Msg { return ViewChangedMsg{View: ACLsTab} },
-		)
+		return m, func() tea.Msg {
+			return ViewChangedMsg{
+				View:   ACLsTab,
+				Notice: "ACL updated",
+				Level:  toastSuccess,
+			}
+		}
 
 	case spinner.TickMsg:
 		if m.updating {

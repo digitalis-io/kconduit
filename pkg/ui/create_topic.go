@@ -5,10 +5,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/digitalis-io/kconduit/pkg/kafka"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/digitalis-io/kconduit/pkg/kafka"
 )
 
 type CreateTopicModel struct {

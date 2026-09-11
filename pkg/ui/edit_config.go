@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/digitalis-io/kconduit/pkg/kafka"
-	"github.com/digitalis-io/kconduit/pkg/logger"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/digitalis-io/kconduit/pkg/kafka"
+	"github.com/digitalis-io/kconduit/pkg/logger"
 )
 
 // EditConfigModel handles editing a single configuration value
@@ -69,10 +69,10 @@ func NewEditConfigModel(client *kafka.Client, topicName, configKey, currentValue
 	case isChoice:
 		// Choice fields with known options
 		var options []huh.Option[string]
-		
+
 		// Add a "Keep current" option first to detect no change
 		options = append(options, huh.NewOption(fmt.Sprintf("Keep current: %s", currentValue), ""))
-		
+
 		switch configKey {
 		case "cleanup.policy":
 			options = append(options,
@@ -104,12 +104,12 @@ func NewEditConfigModel(client *kafka.Client, topicName, configKey, currentValue
 	case isNumeric:
 		// Numeric fields use text input with validation
 		description := fmt.Sprintf("Current value: %s", currentValue)
-		
+
 		// Add help text for time-based fields
 		if strings.HasSuffix(configKey, ".ms") {
 			description += "\n💡 Tip: You can use formats like 1h, 1d, 7d, 1w (will convert to milliseconds)"
 		}
-		
+
 		input = huh.NewInput().
 			Title(fmt.Sprintf("Edit %s", configKey)).
 			Description(description).
@@ -150,7 +150,7 @@ func (m *EditConfigModel) Init() tea.Cmd {
 
 func (m *EditConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	log := logger.Get()
-	
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch s := msg.String(); s {
@@ -176,7 +176,7 @@ func (m *EditConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"newValue":     m.newValue,
 				"formState":    "completed",
 			}).Debug("Form completed, checking for changes")
-			
+
 			// If newValue is empty, it means user didn't change anything (for text inputs)
 			// or pressed enter without selecting (for selects)
 			if m.newValue == "" || m.newValue == m.currentValue {
@@ -192,7 +192,7 @@ func (m *EditConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"oldValue": m.currentValue,
 				"newValue": m.newValue,
 			}).Info("Applying configuration change")
-			
+
 			err := m.client.UpdateTopicConfig(m.topicName, m.configKey, m.newValue)
 			if err != nil {
 				m.err = err
@@ -206,10 +206,15 @@ func (m *EditConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.submitted = true
 			log.Info("Configuration updated successfully")
-			// Show success message for a bit longer
+			// Show the success message in place briefly, then hand the same
+			// confirmation to the list view as a toast.
 			return m, tea.Sequence(
 				tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-					return SwitchToListViewMsg{}
+					return SwitchToListViewMsg{
+						Notice: fmt.Sprintf("Set %s = %s on %s",
+							m.configKey, m.newValue, m.topicName),
+						Level: toastSuccess,
+					}
 				}),
 			)
 		case huh.StateAborted:

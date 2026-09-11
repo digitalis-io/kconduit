@@ -13,7 +13,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        go: ['1.24.5']
+        go: ['1.27.0']
 
     steps:
       - name: Checkout code
@@ -46,7 +46,7 @@ jobs:
         run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./cmd/... ./pkg/...
 
       - name: Upload coverage to Codecov
-        if: matrix.os == 'ubuntu-latest' && matrix.go == '1.24.5'
+        if: matrix.os == 'ubuntu-latest' && matrix.go == '1.27.0'
         uses: codecov/codecov-action@v3
         with:
           file: ./coverage.txt
@@ -67,7 +67,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.5'
+          go-version: '1.27.0'
 
       - name: Get dependencies
         run: go mod download
@@ -95,7 +95,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.5'
+          go-version: '1.27.0'
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v8

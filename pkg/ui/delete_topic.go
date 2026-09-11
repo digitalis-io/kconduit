@@ -4,20 +4,20 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/digitalis-io/kconduit/pkg/kafka"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/digitalis-io/kconduit/pkg/kafka"
 )
 
 type DeleteTopicModel struct {
-	client           *kafka.Client
-	topicToDelete    string
-	confirmInput     textinput.Model
-	focusedButton    int // 0: input field, 1: yes button, 2: no button
-	err              error
-	width            int
-	height           int
+	client        *kafka.Client
+	topicToDelete string
+	confirmInput  textinput.Model
+	focusedButton int // 0: input field, 1: yes button, 2: no button
+	err           error
+	width         int
+	height        int
 }
 
 func NewDeleteTopicModel(client *kafka.Client, topicName string) DeleteTopicModel {
@@ -116,8 +116,8 @@ func (m DeleteTopicModel) Update(msg tea.Msg) (DeleteTopicModel, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
-		// Success - return to list view
-		return m, ReturnToListView
+		return m, returnWithNotice(toastSuccess,
+			fmt.Sprintf("Deleted topic %q", msg.topicName))
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -144,7 +144,7 @@ func (m DeleteTopicModel) View() string {
 	dangerStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("196")).
 		Bold(true)
-	
+
 	s.WriteString(dangerStyle.Render("WARNING: This action cannot be undone!"))
 	s.WriteString("\n\n")
 
@@ -152,7 +152,7 @@ func (m DeleteTopicModel) View() string {
 	topicStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("229")).
 		Bold(true)
-	
+
 	fmt.Fprintf(&s, "You are about to delete topic: %s\n\n",
 		topicStyle.Render(m.topicToDelete))
 
@@ -214,7 +214,7 @@ func (m DeleteTopicModel) View() string {
 			Foreground(lipgloss.Color("240"))
 		s.WriteString(disabledStyle.Render("[ Delete ]"))
 	}
-	
+
 	s.WriteString(noStyle.Render("[ Cancel ]"))
 	s.WriteString("\n\n")
 
@@ -229,13 +229,13 @@ func (m DeleteTopicModel) View() string {
 	// Help text
 	helpStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("241"))
-	
+
 	if !validInput && m.confirmInput.Value() != "" {
 		mismatchStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("208"))
 		s.WriteString(mismatchStyle.Render("⚠️  Topic name doesn't match\n\n"))
 	}
-	
+
 	s.WriteString(helpStyle.Render("Tab: Navigate • Enter: Select • Esc: Cancel"))
 
 	return s.String()

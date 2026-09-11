@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/digitalis-io/kconduit/pkg/kafka"
-	"github.com/digitalis-io/kconduit/pkg/logger"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/digitalis-io/kconduit/pkg/kafka"
+	"github.com/digitalis-io/kconduit/pkg/logger"
 )
 
 type CreateACLHuhModel struct {
@@ -324,10 +324,13 @@ func (m *CreateACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.success = true
 		log.Info("ACL(s) created successfully, returning to ACLs tab")
-		return m, tea.Batch(
-			tea.Println("✅ ACL(s) created successfully!"),
-			func() tea.Msg { return ViewChangedMsg{View: ACLsTab} },
-		)
+		return m, func() tea.Msg {
+			return ViewChangedMsg{
+				View:   ACLsTab,
+				Notice: "ACL created",
+				Level:  toastSuccess,
+			}
+		}
 
 	case spinner.TickMsg:
 		if m.creating {

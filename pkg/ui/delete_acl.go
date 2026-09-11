@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/digitalis-io/kconduit/pkg/kafka"
-	"github.com/digitalis-io/kconduit/pkg/logger"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/digitalis-io/kconduit/pkg/kafka"
+	"github.com/digitalis-io/kconduit/pkg/logger"
 )
 
 type DeleteACLModel struct {
@@ -100,14 +100,14 @@ func (m *DeleteACLModel) deleteACL() tea.Cmd {
 		log := logger.Get()
 		log.WithFields(map[string]interface{}{
 			"principal":      m.acl.Principal,
-			"host":          m.acl.Host,
-			"resourceType":  m.acl.ResourceType,
-			"resourceName":  m.acl.ResourceName,
-			"patternType":   m.acl.PatternType,
-			"operation":     m.acl.Operation,
+			"host":           m.acl.Host,
+			"resourceType":   m.acl.ResourceType,
+			"resourceName":   m.acl.ResourceName,
+			"patternType":    m.acl.PatternType,
+			"operation":      m.acl.Operation,
 			"permissionType": m.acl.PermissionType,
 		}).Info("Attempting to delete ACL")
-		
+
 		err := m.client.DeleteACL(m.acl)
 		if err != nil {
 			log.WithError(err).Error("Failed to delete ACL")
@@ -120,7 +120,7 @@ func (m *DeleteACLModel) deleteACL() tea.Cmd {
 
 func (m *DeleteACLModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	log := logger.Get()
-	
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -133,7 +133,7 @@ func (m *DeleteACLModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		log.WithField("key", msg.String()).Debug("Key pressed in DeleteACL")
-		
+
 		switch msg.String() {
 		case "esc":
 			if !m.deleting {
@@ -159,12 +159,13 @@ func (m *DeleteACLModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.deleting = false
 		log.Info("ACL deleted successfully, returning to ACLs tab")
 		// Add a small delay before returning to see the success message
-		return m, tea.Batch(
-			tea.Println("✅ ACL deleted successfully!"),
-			tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
-				return ViewChangedMsg{View: ACLsTab}
-			}),
-		)
+		return m, tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+			return ViewChangedMsg{
+				View:   ACLsTab,
+				Notice: "ACL deleted",
+				Level:  toastSuccess,
+			}
+		})
 
 	case spinner.TickMsg:
 		if m.deleting {
@@ -186,14 +187,14 @@ func (m *DeleteACLModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Log current field values to debug the binding issue
 		log.WithFields(map[string]interface{}{
-			"state":    m.form.State,
-			"confirm":  m.confirm,
+			"state":   m.form.State,
+			"confirm": m.confirm,
 		}).Debug("Current form values during update")
-		
+
 		// Check if form is complete
 		if m.form.State == huh.StateCompleted {
 			log.WithField("confirm", m.confirm).Info("Form completed, checking confirmation")
-			
+
 			// Check if user confirmed
 			if m.confirm {
 				log.Info("User confirmed, deleting ACL")
@@ -223,7 +224,7 @@ func (m *DeleteACLModel) View() string {
 			Padding(2, 4)
 		return successStyle.Render("✅ ACL deleted successfully!")
 	}
-	
+
 	if m.deleting {
 		return lipgloss.NewStyle().
 			Padding(2, 4).
