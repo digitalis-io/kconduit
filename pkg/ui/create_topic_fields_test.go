@@ -3,6 +3,9 @@ package ui
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func TestValidateTopicNameAcceptsLegalNames(t *testing.T) {
@@ -148,5 +151,24 @@ func TestPluralise(t *testing.T) {
 	}
 	if got, want := pluralise(2, "partition"), "2 partitions"; got != want {
 		t.Errorf("pluralise = %q, want %q", got, want)
+	}
+}
+
+func TestCreateButtonIsDimmedUntilTheFormIsValid(t *testing.T) {
+	// Tests run without a TTY, where lipgloss picks the Ascii profile and drops
+	// every colour — which would make the two renderings identical and the
+	// assertion meaningless. Force a colour profile for the duration.
+	restore := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(restore)
+
+	incomplete := newTestForm(t, "", "", "", 3)
+	complete := newTestForm(t, "orders", "", "", 3)
+
+	if incomplete.renderButtons() == complete.renderButtons() {
+		t.Error("Create looks the same whether or not the form can be submitted")
+	}
+	if !strings.Contains(incomplete.renderButtons(), string(theme.Muted)) {
+		t.Error("Create is not dimmed while the form is incomplete")
 	}
 }

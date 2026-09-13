@@ -44,7 +44,7 @@ func (f aclFrame) render() string {
 	sb.WriteString("\n\n")
 
 	if f.summary != "" {
-		sb.WriteString(f.summary)
+		sb.WriteString(lipgloss.NewStyle().Width(f.boxWidth() - 4).Render(f.summary))
 		sb.WriteString("\n")
 		sb.WriteString(helpSepStyle.Render(strings.Repeat("─", max(f.boxWidth()-6, 10))))
 		sb.WriteString("\n\n")
@@ -149,9 +149,22 @@ func aclSummary(acl kafka.ACL) string {
 // draftACLSummary is aclSummary for a form still being filled in, where the
 // operations field holds several values and any field may still be blank.
 func draftACLSummary(principal, host, resourceType, resourceName, patternType, permission string, operations []string) string {
-	action := "no operations selected"
-	if len(operations) > 0 {
-		action = strings.ToLower(strings.Join(operations, ", "))
+	// An untouched form has nothing to summarise, and "- — no operations chosen
+	// yet on any topic" is worse than saying so plainly.
+	if strings.TrimSpace(principal) == "" && len(operations) == 0 {
+		return helpDescStyle.Render("Fill in the fields below to see what this rule will do")
+	}
+
+	resource := labelStyle.Render("on ") + valueStyle.Render(
+		describeResource(resourceType, resourceName, patternType))
+	from := labelStyle.Render("from host ") + valueStyle.Render(orDash(host))
+
+	// Without an operation there is no verb phrase that reads properly — "may
+	// no operations selected" is not a sentence — so the missing part is
+	// called out at the end instead.
+	if len(operations) == 0 {
+		return valueStyle.Render(orDash(principal)) + " " + resource + " " +
+			helpDescStyle.Render("— no operations chosen yet") + "\n" + from
 	}
 
 	verb := "may"
@@ -160,13 +173,9 @@ func draftACLSummary(principal, host, resourceType, resourceName, patternType, p
 		verb = "may not"
 		verbStyle = errorStyle
 	}
+	action := verbStyle.Render(verb + " " + strings.ToLower(strings.Join(operations, ", ")))
 
-	resource := describeResource(resourceType, resourceName, patternType)
-
-	return valueStyle.Render(orDash(principal)) + " " +
-		verbStyle.Render(verb+" "+action) + " " +
-		labelStyle.Render("on ") + valueStyle.Render(resource) + "\n" +
-		labelStyle.Render("from host ") + valueStyle.Render(orDash(host))
+	return valueStyle.Render(orDash(principal)) + " " + action + " " + resource + "\n" + from
 }
 
 // describeResource turns a resource type, name, and pattern into the phrase an

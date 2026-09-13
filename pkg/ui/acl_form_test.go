@@ -84,12 +84,23 @@ func TestDraftACLSummaryJoinsTheSelectedOperations(t *testing.T) {
 	}
 }
 
+func TestDraftACLSummaryIsAPromptWhileTheFormIsUntouched(t *testing.T) {
+	got := stripStyles(draftACLSummary("", "*", "Topic", "", "Literal", "Allow", nil))
+	if !strings.Contains(got, "Fill in the fields below") {
+		t.Errorf("summary of an untouched form = %q, want a prompt", got)
+	}
+}
+
 func TestDraftACLSummarySaysWhenNoOperationIsChosen(t *testing.T) {
 	got := stripStyles(draftACLSummary("User:alice", "*", "Topic", "orders",
 		"Literal", "Allow", nil))
 
-	if !strings.Contains(got, "no operations selected") {
-		t.Errorf("draft summary = %q, want it to say no operations are selected", got)
+	if !strings.Contains(got, "no operations chosen yet") {
+		t.Errorf("draft summary = %q, want it to say no operations are chosen", got)
+	}
+	// "may no operations selected" was the old phrasing and is not a sentence.
+	if strings.Contains(got, "may no") {
+		t.Errorf("draft summary = %q, want no verb phrase when nothing is chosen", got)
 	}
 }
 

@@ -281,12 +281,17 @@ func (m CreateTopicModel) renderFields() string {
 		sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, labelStyled, m.inputs[i].View()))
 		sb.WriteString("\n")
 
-		// One line of guidance at a time, under the field it is about: a
-		// validation message when there is one, otherwise the hint for the
-		// field being filled in.
-		if note := m.fieldNote(i); note != "" {
-			sb.WriteString(strings.Repeat(" ", labelWidth))
-			sb.WriteString(note)
+		// One note at a time, under the field it is about: a validation message
+		// when there is one, otherwise the hint for the field being filled in.
+		//
+		// It is rendered as a block rather than a line, so a note longer than
+		// the frame wraps under itself instead of continuing at the left edge
+		// of the box.
+		if text, style, ok := m.fieldNote(i); ok {
+			sb.WriteString(style.
+				Width(m.noteWidth()).
+				MarginLeft(labelWidth).
+				Render(text))
 			sb.WriteString("\n")
 		}
 
@@ -298,16 +303,23 @@ func (m CreateTopicModel) renderFields() string {
 	return sb.String()
 }
 
-// fieldNote is the line shown under a field: its error if it has one, or its
-// hint while it has focus.
-func (m CreateTopicModel) fieldNote(index int) string {
+// fieldNote is the note shown under a field: its error if it has one, or its
+// hint while it has focus. The style is returned with the text so the caller
+// can set the width on it, which is what makes the note wrap as a block.
+func (m CreateTopicModel) fieldNote(index int) (string, lipgloss.Style, bool) {
 	if err := m.fieldError(index); err != "" {
-		return errorStyle.Render(err)
+		return err, errorStyle, true
 	}
 	if index == m.focusIndex {
-		return helpDescStyle.Render(topicFields[index].hint)
+		return topicFields[index].hint, helpDescStyle, true
 	}
-	return ""
+	return "", lipgloss.Style{}, false
+}
+
+// noteWidth is how much room a note has once the label column and the frame's
+// border and padding are taken out.
+func (m CreateTopicModel) noteWidth() int {
+	return max(m.boxWidth()-4-labelWidth, 20)
 }
 
 // renderSummary spells out what Create will do, including the defaults that
