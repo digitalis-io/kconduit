@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- `github.com/go-viper/mapstructure/v2` raised to v2.3.0, clearing GO-2025-3787
+  (may leak sensitive information in logs when processing malformed data). It
+  arrives transitively through viper and is reached from `viper.init`.
+
 - Control characters are stripped from every value the cluster supplies —
   topic names, consumer group ids, ACL principals, and a consumer's `client.id`
   — before it reaches a table cell or the clipboard. A consumer can set its
