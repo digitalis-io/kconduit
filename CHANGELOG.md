@@ -109,7 +109,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Short-lived Kafka clients are given a copy of the connection configuration
   rather than the one the long-lived admin and producer clients are using, which
   sarama can rewrite in place.
-- Cancelling the delete-topic dialog no longer reloads the topic list.
+- Cancelling the delete-topic dialog no longer reloads the topic list, and
+  cancelling any of the three ACL dialogs no longer refetches the ACL list.
 
 ## [0.0.4] - 2026-04-19
 

@@ -885,6 +885,13 @@ func (m Model) updateCreateACLView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ViewChangedMsg:
 		if msg.View == ACLsTab {
 			m.activeTab = ACLsTab
+			// Only a dialog that changed something carries a notice. Cancelling
+			// out of one changed nothing on the cluster, so the list is already
+			// correct and does not need a refetch or a spinner over it — the
+			// same rule the delete-topic dialog follows.
+			if msg.Notice == "" {
+				return m.backToList(SwitchToListViewMsg{}, nil, "")
+			}
 			return m.backToList(
 				SwitchToListViewMsg{Notice: msg.Notice, Level: msg.Level},
 				fetchACLs(m.client), "Reloading ACLs…")
@@ -904,6 +911,13 @@ func (m Model) updateEditACLView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ViewChangedMsg:
 		if msg.View == ACLsTab {
 			m.activeTab = ACLsTab
+			// Only a dialog that changed something carries a notice. Cancelling
+			// out of one changed nothing on the cluster, so the list is already
+			// correct and does not need a refetch or a spinner over it — the
+			// same rule the delete-topic dialog follows.
+			if msg.Notice == "" {
+				return m.backToList(SwitchToListViewMsg{}, nil, "")
+			}
 			return m.backToList(
 				SwitchToListViewMsg{Notice: msg.Notice, Level: msg.Level},
 				fetchACLs(m.client), "Reloading ACLs…")
@@ -922,6 +936,13 @@ func (m Model) updateDeleteACLView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ViewChangedMsg:
 		if msg.View == ACLsTab {
 			m.activeTab = ACLsTab
+			// Only a dialog that changed something carries a notice. Cancelling
+			// out of one changed nothing on the cluster, so the list is already
+			// correct and does not need a refetch or a spinner over it — the
+			// same rule the delete-topic dialog follows.
+			if msg.Notice == "" {
+				return m.backToList(SwitchToListViewMsg{}, nil, "")
+			}
 			return m.backToList(
 				SwitchToListViewMsg{Notice: msg.Notice, Level: msg.Level},
 				fetchACLs(m.client), "Reloading ACLs…")
