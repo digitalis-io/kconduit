@@ -1,3 +1,13 @@
+<p align="center">
+  <a href="https://digitalis.io">
+    <img src="https://digitalis-marketplace-assets.s3.us-east-1.amazonaws.com/DigitalisDigital_DigitalisFullLogoGradient+-+medium.png" alt="Digitalis.IO" width="300">
+  </a>
+</p>
+
+<p align="center">
+  <em>Built and maintained by <a href="https://digitalis.io">Digitalis.IO</a></em>
+</p>
+
 # KConduit AI Assistant — Natural Language Kafka Management
 
 KConduit includes a built-in AI assistant that lets you manage Apache Kafka clusters using plain English commands directly from the terminal UI. This page documents all supported providers, configuration options, and example commands.
@@ -176,3 +186,8 @@ The AI assistant detects and parses natural language commands for the following 
 - The AI assistant parses JSON responses and executes Kafka operations automatically
 - Topic creation happens immediately after the AI parses the command successfully
 - Topic deletion is intentionally blocked in the AI assistant — use the `D` key in the Topics tab instead
+
+## 💬 Support
+
+This project is maintained by [Digitalis.io](https://digitalis.io). For support,
+visit [digitalis.io/contact](https://digitalis.io/contact).

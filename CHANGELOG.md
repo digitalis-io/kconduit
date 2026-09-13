@@ -55,6 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   those could rewrite the screen, and an OSC 52 sequence copied with `y` could
   overwrite the operator's clipboard.
 
+- `CONTRIBUTING.md` and `SECURITY.md`, which the repository did not have.
+- Package documentation for `pkg/ui`, `pkg/kafka`, `pkg/config` and
+  `pkg/logger`, none of which had a package comment.
+
 ### Changed
 
 - `make` targets for the two test clusters: `kafka-up` / `run-plain` for the
@@ -87,6 +91,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it replaces the rule, because Kafka has no in-place update, and the delete
   dialog shows both the sentence and the exact field values it is about to
   remove.
+- Digitalis.io branding applied consistently across `README.md`,
+  `README_AI.md` and `Formula/README.md`, each of which now carries the logo
+  header and a support block.
+- `Formula/README.md` no longer claims the Homebrew tap works. The
+  `digitalis-io/homebrew-tap` repository does not exist, the `brews:` block in
+  `.goreleaser.yml` is commented out, and `Formula/kconduit.rb` still pins
+  version 0.0.1 with empty checksums — all three are now stated rather than
+  implied to work.
+- `SPEC.md` is marked as the implemented design spec it is, pointing readers at
+  the shipped code and the README for current usage.
 - Gemini credentials are read from `GOOGLE_API_KEY` as well as
   `GEMINI_API_KEY`, so a shell already set up for the Google Cloud SDKs works
   without re-exporting. `GEMINI_API_KEY` wins when both are set.

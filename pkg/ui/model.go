@@ -1,3 +1,14 @@
+// Package ui implements kconduit's terminal UI with Bubble Tea.
+//
+// Model, in this file, is the top-level tea.Model: it owns the list-view
+// tables (topics, brokers, consumer groups, ACLs) and the current ViewMode,
+// and dispatches Update and View calls to the appropriate sub-view model
+// (ProducerModel, ConsumerModel, CreateTopicModel, and so on) when the mode
+// changes. Per-table view state — the active filter and sort column — lives
+// in tableState (tables.go), one instance per table, so filtering and
+// sorting logic is written once and reused across every table. Colors and
+// reusable lipgloss styles are centralized in the theme value (styles.go)
+// rather than being redefined per view.
 package ui
 
 import (

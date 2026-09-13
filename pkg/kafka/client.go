@@ -1,3 +1,14 @@
+// Package kafka wraps IBM Sarama in a Client used by kconduit's UI and AI
+// assistant to talk to a cluster: topic and ACL management, consumer group
+// inspection with lag calculation, and message production and consumption.
+//
+// Client caches the topic list for topicCacheDuration to avoid re-fetching
+// metadata on every UI refresh; ListTopics and GetTopicDetails serve from
+// that cache where possible. GetTopicMetrics (metrics.go) is deliberately
+// kept separate from GetTopicDetails: computing message counts and disk
+// usage costs an offset lookup per partition, so folding it into the cheap
+// metadata call would make every topic-list refresh O(partitions) against
+// the brokers.
 package kafka
 
 import (

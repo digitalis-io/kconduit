@@ -1,5 +1,11 @@
 # SPEC: Session Management UI
 
+> **Status:** Implemented. This is the design spec that shaped the feature —
+> `pkg/ui/session_picker.go`, `pkg/ui/session_manager.go`, and
+> `pkg/ui/session_form.go` — kept here as historical design context, not as
+> living user documentation. For current usage, see the "Session Management"
+> section of [README.md](README.md).
+
 ## 1. Objective
 
 Add session management to the kconduit TUI so users can save, load, edit, and delete named Kafka connection profiles without retyping flags. Sessions are persisted in `~/.config/kconduit/sessions.yaml` via the existing `pkg/config` package.

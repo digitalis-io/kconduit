@@ -1,3 +1,9 @@
+// Package logger configures kconduit's shared logrus logger.
+//
+// Init sets up the global Log instance once per process (guarded by
+// sync.Once) with the requested level and, optionally, a log file; callers
+// elsewhere in kconduit use the package-level Log variable directly rather
+// than passing a logger through every call.
 package logger
 
 import (
