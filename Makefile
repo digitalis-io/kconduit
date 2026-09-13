@@ -8,8 +8,22 @@ GO=go
 GOFLAGS=-v
 LDFLAGS=-s -w
 BUILD_DIR=build
-DOCKER_COMPOSE=docker-compose
+# docker-compose v1 is end-of-life; v2 ships as a docker subcommand.
+DOCKER_COMPOSE=docker compose
 TEST_COMPOSE_FILE=tests/docker-compose.yaml
+ACLS_COMPOSE_FILE=tests/docker-compose-acls.yaml
+
+# Bootstrap addresses for the two test clusters, taken from the advertised
+# EXTERNAL/BROKER_HOST listeners in the compose files above. They are the ports
+# published to this machine, so they only work from the host — a client running
+# inside a container has to use the in-network listener instead.
+PLAIN_BROKERS=localhost:19094,localhost:29094,localhost:39094
+ACL_BROKERS=localhost:29092,localhost:39092,localhost:49092
+
+# Credentials for the ACL cluster, matching tests/kafka_jaas.conf. Passed via
+# the environment because --sasl-password is deprecated.
+ACL_SASL_USERNAME=admin
+ACL_SASL_PASSWORD=admin-secret
 
 # Version information
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -34,7 +48,9 @@ NC=\033[0m # No Color
 help:
 	@echo "$(CYAN)KConduit Makefile$(NC)"
 	@echo "$(GREEN)Available targets:$(NC)"
-	@awk 'BEGIN {FS = ":.*##"; printf "\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  $(YELLOW)%-20s$(NC) %s\n", $$1, $$2 } /^##@/ { printf "\n$(CYAN)%s$(NC)\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@awk '/^##@/ { printf "\n$(CYAN)%s$(NC)\n", substr($$0, 5); next } \
+	      /^## [a-zA-Z_-]+:/ { sep = index($$0, ":"); \
+	        printf "  $(YELLOW)%-22s$(NC) %s\n", substr($$0, 4, sep - 4), substr($$0, sep + 2) }' $(MAKEFILE_LIST)
 
 ##@ Build
 
@@ -83,21 +99,22 @@ install:
 
 ##@ Development
 
-## run: Build and run the application
+## run: Build and run the application against the default broker
 .PHONY: run
-run-dev: build
-	@echo "$(GREEN)Running $(BINARY_NAME)...$(NC)"
-	./$(BINARY_NAME) -b 127.0.0.1:29092,127.0.0.1:39092,127.0.0.1:49092 \
-    --sasl \
-    --sasl-protocol SASL_PLAINTEXT \
-    --sasl-mechanism PLAIN \
-    --sasl-username admin \
-    --sasl-password admin-secret \
-    --log-level debug --log-file /tmp/k.log
-
 run: build
 	@echo "$(GREEN)Running $(BINARY_NAME)...$(NC)"
 	./$(BINARY_NAME)
+
+## run-dev: Run against the ACL cluster with debug logging to /tmp/k.log
+.PHONY: run-dev
+run-dev: build
+	@echo "$(GREEN)Running $(BINARY_NAME) against the ACL cluster (debug)...$(NC)"
+	KCONDUIT_SASL_PASSWORD=$(ACL_SASL_PASSWORD) ./$(BINARY_NAME) -b $(ACL_BROKERS) \
+		--sasl \
+		--sasl-protocol SASL_PLAINTEXT \
+		--sasl-mechanism PLAIN \
+		--sasl-username $(ACL_SASL_USERNAME) \
+		--log-level debug --log-file /tmp/k.log
 
 ## run-debug: Run with debug logging
 .PHONY: run-debug
@@ -169,13 +186,18 @@ benchmark:
 
 ##@ Kafka Environment
 
-## kafka-up: Start local Kafka cluster using docker-compose
+## kafka-up: Start the plaintext Kafka cluster (no ACLs)
 .PHONY: kafka-up
 kafka-up:
-	@echo "$(GREEN)Starting Kafka cluster...$(NC)"
+	@if docker ps --format '{{.Names}}' | grep -qx broker-1; then \
+		echo "$(RED)The ACL cluster is running and publishes the same ports (29094, 39094, 8088).$(NC)"; \
+		echo "$(YELLOW)Run 'make kafka-acls-down' first.$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)Starting the plaintext Kafka cluster...$(NC)"
 	$(DOCKER_COMPOSE) -f $(TEST_COMPOSE_FILE) up -d
-	@echo "$(GREEN)✓ Kafka cluster started on localhost:19092$(NC)"
-	@echo "$(YELLOW)Run 'make run-local' to connect to local cluster$(NC)"
+	@echo "$(GREEN)✓ Cluster started on $(PLAIN_BROKERS)$(NC)"
+	@echo "$(YELLOW)Run 'make run-plain' to connect to it$(NC)"
 
 ## kafka-down: Stop local Kafka cluster
 .PHONY: kafka-down
@@ -196,11 +218,59 @@ kafka-clean:
 	$(DOCKER_COMPOSE) -f $(TEST_COMPOSE_FILE) down -v
 	@echo "$(GREEN)✓ Kafka cluster and volumes removed$(NC)"
 
-## run-local: Run KConduit connected to local Kafka cluster
+## kafka-acls-up: Start the SASL Kafka cluster (ACLs enabled)
+.PHONY: kafka-acls-up
+kafka-acls-up:
+	@if docker ps --format '{{.Names}}' | grep -qx broker1; then \
+		echo "$(RED)The plaintext cluster is running and publishes the same ports (29094, 39094, 8088).$(NC)"; \
+		echo "$(YELLOW)Run 'make kafka-down' first.$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)Starting the SASL Kafka cluster...$(NC)"
+	$(DOCKER_COMPOSE) -f $(ACLS_COMPOSE_FILE) up -d
+	@echo "$(GREEN)✓ Cluster started on $(ACL_BROKERS)$(NC)"
+	@echo "$(YELLOW)Run 'make run-acls' to connect to it$(NC)"
+
+## kafka-acls-down: Stop the SASL Kafka cluster
+.PHONY: kafka-acls-down
+kafka-acls-down:
+	@echo "$(GREEN)Stopping the SASL Kafka cluster...$(NC)"
+	$(DOCKER_COMPOSE) -f $(ACLS_COMPOSE_FILE) down
+	@echo "$(GREEN)✓ SASL Kafka cluster stopped$(NC)"
+
+## kafka-acls-logs: View SASL Kafka cluster logs
+.PHONY: kafka-acls-logs
+kafka-acls-logs:
+	$(DOCKER_COMPOSE) -f $(ACLS_COMPOSE_FILE) logs -f
+
+## kafka-acls-clean: Stop the SASL cluster and remove volumes
+.PHONY: kafka-acls-clean
+kafka-acls-clean:
+	@echo "$(RED)Removing the SASL Kafka cluster and volumes...$(NC)"
+	$(DOCKER_COMPOSE) -f $(ACLS_COMPOSE_FILE) down -v
+	@echo "$(GREEN)✓ SASL Kafka cluster and volumes removed$(NC)"
+
+##@ Running against a test cluster
+
+## run-plain: Run KConduit against the plaintext cluster (no ACLs)
+.PHONY: run-plain
+run-plain: build
+	@echo "$(GREEN)Connecting to the plaintext cluster on $(PLAIN_BROKERS)...$(NC)"
+	./$(BINARY_NAME) -b $(PLAIN_BROKERS)
+
+## run-acls: Run KConduit against the SASL cluster (ACLs enabled)
+.PHONY: run-acls
+run-acls: build
+	@echo "$(GREEN)Connecting to the SASL cluster on $(ACL_BROKERS)...$(NC)"
+	KCONDUIT_SASL_PASSWORD=$(ACL_SASL_PASSWORD) ./$(BINARY_NAME) -b $(ACL_BROKERS) \
+		--sasl \
+		--sasl-protocol SASL_PLAINTEXT \
+		--sasl-mechanism PLAIN \
+		--sasl-username $(ACL_SASL_USERNAME)
+
+## run-local: Alias for run-plain, kept for existing muscle memory
 .PHONY: run-local
-run-local: build
-	@echo "$(GREEN)Running $(BINARY_NAME) connected to local Kafka...$(NC)"
-	./$(BINARY_NAME) -b localhost:19092
+run-local: run-plain
 
 ##@ AI Testing
 
@@ -209,20 +279,20 @@ run-local: build
 test-ai-openai: build
 	@test -n "$$OPENAI_API_KEY" || (echo "$(RED)Error: OPENAI_API_KEY not set$(NC)" && exit 1)
 	@echo "$(GREEN)Testing with OpenAI...$(NC)"
-	./$(BINARY_NAME) -b localhost:19092 --ai-engine openai --ai-model gpt-3.5-turbo
+	./$(BINARY_NAME) -b $(PLAIN_BROKERS) --ai-engine openai --ai-model gpt-3.5-turbo
 
 ## test-ai-gemini: Test with Gemini (requires GEMINI_API_KEY)
 .PHONY: test-ai-gemini
 test-ai-gemini: build
 	@test -n "$$GEMINI_API_KEY" || (echo "$(RED)Error: GEMINI_API_KEY not set$(NC)" && exit 1)
 	@echo "$(GREEN)Testing with Gemini...$(NC)"
-	./$(BINARY_NAME) -b localhost:19092 --ai-engine gemini --ai-model gemini-3.1-pro-preview
+	./$(BINARY_NAME) -b $(PLAIN_BROKERS) --ai-engine gemini --ai-model gemini-3.1-pro-preview
 
 ## test-ai-ollama: Test with Ollama (requires ollama to be running)
 .PHONY: test-ai-ollama
 test-ai-ollama: build
 	@echo "$(GREEN)Testing with Ollama (ensure ollama is running)...$(NC)"
-	./$(BINARY_NAME) -b localhost:19092 --ai-engine ollama --ai-model llama2
+	./$(BINARY_NAME) -b $(PLAIN_BROKERS) --ai-engine ollama --ai-model llama2
 
 ##@ Cleanup
 

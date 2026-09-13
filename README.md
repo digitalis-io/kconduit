@@ -341,10 +341,22 @@ make run
 # Clean build artifacts
 make clean
 
-# Run with test Kafka cluster
-docker-compose -f tests/docker-compose.yaml up -d
-./kconduit -b localhost:19092
+# Start a local test cluster and connect to it
+make kafka-up        # plaintext, no ACLs
+make run-plain
+
+# Or the SASL cluster with ACLs enabled
+make kafka-acls-up
+make run-acls
+
+# Stop them again
+make kafka-down
+make kafka-acls-down
 ```
+
+The two clusters publish some of the same ports, so only one can run at a time;
+`make kafka-up` and `make kafka-acls-up` each refuse to start if the other is
+already up. `make help` lists every target.
 
 ## 🔒 Safety Features
 

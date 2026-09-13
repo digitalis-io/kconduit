@@ -46,6 +46,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `make` targets for the two test clusters: `kafka-up` / `run-plain` for the
+  plaintext cluster and `kafka-acls-up` / `run-acls` for the SASL one, plus the
+  matching `down`, `logs`, and `clean` targets for both. The two clusters
+  publish overlapping ports, so each `up` target refuses to start while the
+  other cluster is running rather than failing on a port bind.
+- `make help` lists the targets again. The awk that generates it expected
+  `target: ## description` while the file documents targets as
+  `## target: description` on the preceding line, so it printed only the
+  section headings.
+- `run-local` and the three `test-ai-*` targets pointed at `localhost:19092`,
+  where nothing listens: the plaintext cluster advertises 19094, 29094 and
+  39094. `run-local` is now an alias for `run-plain`.
+- `make` uses `docker compose` rather than the end-of-life `docker-compose` v1
+  binary, and `run-dev` passes the SASL password through
+  `KCONDUIT_SASL_PASSWORD` instead of the deprecated `--sasl-password` flag.
 - The create-topic form is now a framed, centred dialog matching the rest of the
   app: labels in their own column, one line of guidance under the field being
   filled in, and a summary spelling out what Create will do with the defaults
