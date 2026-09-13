@@ -17,8 +17,9 @@
 # Go workspace file
 go.work
 
-# Binary
-kconduit
+# Binary. Anchored, so it matches the built binary at the repo root and not
+# the cmd/kconduit package directory.
+/kconduit
 
 # IDE specific files
 .idea/
