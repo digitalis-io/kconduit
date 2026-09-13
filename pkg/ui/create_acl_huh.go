@@ -68,9 +68,13 @@ var (
 	}
 )
 
-func NewCreateACLHuhModel(client *kafka.Client) *CreateACLHuhModel {
+// NewCreateACLHuhModel builds the create dialog. width and height come from
+// the view that opened it, for the reason given on NewCreateTopicModel.
+func NewCreateACLHuhModel(client *kafka.Client, width, height int) *CreateACLHuhModel {
 	m := &CreateACLHuhModel{
 		client:         client,
+		width:          width,
+		height:         height,
 		principal:      "",  // Start empty to ensure user input is captured
 		host:           "*", // Default host to all
 		resourceType:   "Topic",
@@ -84,7 +88,7 @@ func NewCreateACLHuhModel(client *kafka.Client) *CreateACLHuhModel {
 	// Create spinner
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	s.Style = lipgloss.NewStyle().Foreground(theme.Primary)
 	m.spinner = s
 
 	// Build the form
@@ -94,19 +98,7 @@ func NewCreateACLHuhModel(client *kafka.Client) *CreateACLHuhModel {
 }
 
 func (m *CreateACLHuhModel) buildForm() {
-	theme := huh.ThemeCharm()
-	theme.Focused.Title = theme.Focused.Title.Foreground(lipgloss.Color("205"))
-	theme.Focused.SelectedOption = theme.Focused.SelectedOption.Foreground(lipgloss.Color("205"))
-	theme.Focused.MultiSelectSelector = theme.Focused.MultiSelectSelector.Foreground(lipgloss.Color("205"))
-
-	// Calculate available height for form (leave room for title and help)
-	formHeight := m.height - 8 // Account for title, help text, and margins
-	if formHeight < 15 {
-		formHeight = 15 // Minimum height for usability
-	}
-	if formHeight > 50 {
-		formHeight = 50 // Cap maximum height for better UX
-	}
+	formHeight := aclFormHeight(m.height)
 
 	// Single group with all fields in one view
 	m.form = huh.NewForm(
@@ -167,11 +159,12 @@ func (m *CreateACLHuhModel) buildForm() {
 		),
 	)
 
+	frame := aclFrame{width: m.width}
 	m.form = m.form.
-		WithTheme(theme).
+		WithTheme(aclHuhTheme()).
 		WithShowHelp(true).
 		WithShowErrors(true).
-		WithWidth(m.width - 4).
+		WithWidth(frame.boxWidth() - 6).
 		WithHeight(formHeight)
 }
 
@@ -295,7 +288,10 @@ func (m *CreateACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		// Update form dimensions without rebuilding
 		if m.form != nil {
-			m.form = m.form.WithWidth(m.width - 4).WithHeight(m.height - 8)
+			frame := aclFrame{width: m.width}
+			m.form = m.form.
+				WithWidth(frame.boxWidth() - 6).
+				WithHeight(aclFormHeight(m.height))
 		}
 		return m, nil
 
@@ -395,59 +391,27 @@ func (m *CreateACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *CreateACLHuhModel) View() string {
-	if m.creating {
-		return lipgloss.NewStyle().
-			Padding(2, 4).
-			Render(fmt.Sprintf("%s Creating ACL(s)...\n\nOperations: %s\nResource: %s %s\nPrincipal: %s",
-				m.spinner.View(),
-				strings.Join(m.operations, ", "),
-				m.resourceType,
-				m.resourceName,
-				m.principal))
+	frame := aclFrame{
+		title: "Create ACL",
+		summary: draftACLSummary(m.principal, m.host, m.resourceType,
+			m.resourceName, m.patternType, m.permissionType, m.operations),
+		form:   m.form.View(),
+		help:   []string{"tab", "next field", "space", "select", "enter", "confirm", "esc", "cancel"},
+		width:  m.width,
+		height: m.height,
 	}
 
-	if m.success {
-		successStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("42")).
-			Bold(true).
-			Padding(2, 4)
-		return successStyle.Render("✅ ACL(s) created successfully!")
+	switch {
+	case m.creating:
+		frame.form = aclProgress(m.spinner.View(),
+			fmt.Sprintf("Creating %s…", pluralise(len(m.operations), "ACL")))
+		frame.help = []string{"esc", "cancel"}
+	case m.success:
+		frame.form = successStyle.Render("✓  Created")
+		frame.help = []string{"esc", "back"}
+	case m.err != nil:
+		frame.status = errorStyle.Render("✗  " + m.err.Error())
 	}
 
-	// Title
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("205")).
-		MarginBottom(1).
-		Padding(0, 2)
-
-	title := titleStyle.Render("🔐 Create Access Control List")
-
-	// Error display
-	var errorView string
-	if m.err != nil {
-		errorStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
-			Bold(true).
-			Padding(1, 2)
-		errorView = errorStyle.Render(fmt.Sprintf("❌ Error: %v", m.err))
-	}
-
-	// Help text
-	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		Padding(0, 2)
-
-	helpText := helpStyle.Render("Use Tab/Shift+Tab to navigate • Space to select • Enter to confirm • Esc to cancel")
-
-	// Combine all views
-	formView := m.form.View()
-
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		formView,
-		errorView,
-		helpText,
-	)
+	return frame.render()
 }

@@ -139,7 +139,7 @@ func NewAIAssistantModel(client *kafka.Client, aiEngine string, aiModel string) 
 	config := AIConfig{
 		OpenAIKey:      getEnv("OPENAI_API_KEY", ""),
 		OpenAIModel:    getEnv("OPENAI_MODEL", "gpt-3.5-turbo"),
-		GeminiKey:      getEnv("GEMINI_API_KEY", ""),
+		GeminiKey:      getFirstEnv("", "GEMINI_API_KEY", "GOOGLE_API_KEY"),
 		GeminiModel:    getEnv("GEMINI_MODEL", "gemini-3.1-pro-preview"),
 		AnthropicKey:   getEnv("ANTHROPIC_API_KEY", ""),
 		AnthropicModel: getEnv("ANTHROPIC_MODEL", "claude-3-haiku-20240307"),
@@ -198,6 +198,23 @@ func NewAIAssistantModel(client *kafka.Client, aiEngine string, aiModel string) 
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return defaultValue
+}
+
+// getFirstEnv returns the first of keys that is set to a non-empty value, or
+// defaultValue if none is.
+//
+// Gemini credentials reach a machine under either name: GEMINI_API_KEY is what
+// Google's own Gemini tooling uses, GOOGLE_API_KEY what the wider Google Cloud
+// SDKs set. Accepting both means a shell already set up for one does not have
+// to be re-exported for the other. The order is the preference: an explicit
+// GEMINI_API_KEY wins over a general-purpose GOOGLE_API_KEY.
+func getFirstEnv(defaultValue string, keys ...string) string {
+	for _, key := range keys {
+		if value := os.Getenv(key); value != "" {
+			return value
+		}
 	}
 	return defaultValue
 }
@@ -454,7 +471,7 @@ func (m AIAssistantModel) getAPIKeyStatus() string {
 		if m.config.GeminiKey != "" {
 			return "Configured"
 		}
-		return "API key not set (GEMINI_API_KEY)"
+		return "API key not set (GEMINI_API_KEY or GOOGLE_API_KEY)"
 	case Anthropic:
 		if m.config.AnthropicKey != "" {
 			return "Configured"
@@ -614,7 +631,7 @@ func (m *AIAssistantModel) queryOpenAI(query string) (string, error) {
 
 func (m *AIAssistantModel) queryGemini(query string) (string, error) {
 	if m.config.GeminiKey == "" {
-		return "", fmt.Errorf("gemini API key not configured; set GEMINI_API_KEY environment variable")
+		return "", fmt.Errorf("gemini API key not configured; set GEMINI_API_KEY or GOOGLE_API_KEY")
 	}
 
 	fullPrompt := aiSystemPrompt + "\n\nUser: " + query

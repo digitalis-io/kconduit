@@ -33,9 +33,13 @@ type EditACLHuhModel struct {
 	confirm        bool
 }
 
-func NewEditACLHuhModel(client *kafka.Client, acl kafka.ACL) EditACLHuhModel {
+// NewEditACLHuhModel builds the edit dialog. width and height come from the
+// view that opened it, for the reason given on NewCreateTopicModel.
+func NewEditACLHuhModel(client *kafka.Client, acl kafka.ACL, width, height int) EditACLHuhModel {
 	m := EditACLHuhModel{
 		client:         client,
+		width:          width,
+		height:         height,
 		originalACL:    acl,
 		principal:      acl.Principal,
 		host:           acl.Host,
@@ -60,30 +64,11 @@ func NewEditACLHuhModel(client *kafka.Client, acl kafka.ACL) EditACLHuhModel {
 }
 
 func (m *EditACLHuhModel) buildForm() {
-	theme := huh.ThemeCharm()
-	theme.Focused.Title = theme.Focused.Title.Foreground(lipgloss.Color("205"))
-	theme.Focused.SelectedOption = theme.Focused.SelectedOption.Foreground(lipgloss.Color("205"))
-	theme.Focused.MultiSelectSelector = theme.Focused.MultiSelectSelector.Foreground(lipgloss.Color("205"))
-
-	// Calculate available height for form (leave room for title and help)
-	formHeight := m.height - 8 // Account for title, help text, and margins
-	if formHeight < 15 {
-		formHeight = 15 // Minimum height for usability
-	}
-	if formHeight > 50 {
-		formHeight = 50 // Cap maximum height for better UX
-	}
+	formHeight := aclFormHeight(m.height)
 
 	// Single group with all fields in one view
 	m.form = huh.NewForm(
 		huh.NewGroup(
-			huh.NewNote().
-				Title("✏️  Edit ACL").
-				Description(fmt.Sprintf("Editing ACL for %s on %s %s\n⚠️  This will delete the existing ACL and create new ACL(s) with the updated values.",
-					m.originalACL.Principal,
-					m.originalACL.ResourceType,
-					m.originalACL.ResourceName)),
-
 			huh.NewInput().
 				Title("Principal").
 				Description("User principal (e.g., User:alice, User:*)").
@@ -137,11 +122,12 @@ func (m *EditACLHuhModel) buildForm() {
 		),
 	)
 
+	frame := aclFrame{width: m.width}
 	m.form = m.form.
-		WithTheme(theme).
+		WithTheme(aclHuhTheme()).
 		WithShowHelp(true).
 		WithShowErrors(true).
-		WithWidth(m.width - 4).
+		WithWidth(frame.boxWidth() - 6).
 		WithHeight(formHeight)
 }
 
@@ -240,7 +226,10 @@ func (m EditACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		// Update form dimensions without rebuilding
 		if m.form != nil {
-			m.form = m.form.WithWidth(m.width - 4).WithHeight(m.height - 8)
+			frame := aclFrame{width: m.width}
+			m.form = m.form.
+				WithWidth(frame.boxWidth() - 6).
+				WithHeight(aclFormHeight(m.height))
 		}
 		return m, nil
 
@@ -310,50 +299,33 @@ func (m EditACLHuhModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m EditACLHuhModel) View() string {
-	if m.updating {
-		return lipgloss.NewStyle().
-			Padding(2, 4).
-			Render(fmt.Sprintf("%s Updating ACL(s)...\n\nDeleting original: %s %s on %s %s\nCreating new: %s operations",
-				m.spinner.View(),
-				m.originalACL.Operation,
-				m.originalACL.PermissionType,
-				m.originalACL.ResourceType,
-				m.originalACL.ResourceName,
-				strings.Join(m.operations, ", ")))
+	// Editing an ACL is a delete followed by a create — Kafka has no update —
+	// so the frame says so rather than letting "Save" imply an in-place change.
+	summary := labelStyle.Render("Replacing") + "\n" +
+		aclSummary(m.originalACL) + "\n\n" +
+		labelStyle.Render("With") + "\n" +
+		draftACLSummary(m.principal, m.host, m.resourceType,
+			m.resourceName, m.patternType, m.permissionType, m.operations)
+
+	frame := aclFrame{
+		title:   "Edit ACL",
+		summary: summary,
+		form:    m.form.View(),
+		help:    []string{"tab", "next field", "space", "select", "enter", "save", "esc", "cancel"},
+		width:   m.width,
+		height:  m.height,
 	}
 
-	if m.success {
-		successStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("42")).
-			Bold(true).
-			Padding(2, 4)
-		return successStyle.Render("✅ ACL(s) updated successfully!")
+	switch {
+	case m.updating:
+		frame.form = aclProgress(m.spinner.View(), "Replacing the ACL…")
+		frame.help = []string{"esc", "cancel"}
+	case m.success:
+		frame.form = successStyle.Render("✓  Updated")
+		frame.help = []string{"esc", "back"}
+	case m.err != nil:
+		frame.status = errorStyle.Render("✗  " + m.err.Error())
 	}
 
-	// Error display
-	var errorView string
-	if m.err != nil {
-		errorStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
-			Bold(true).
-			Padding(1, 2)
-		errorView = errorStyle.Render(fmt.Sprintf("❌ Error: %v", m.err))
-	}
-
-	// Help text
-	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		Padding(0, 2)
-
-	helpText := helpStyle.Render("Use Tab/Shift+Tab to navigate • Space to select • Enter to confirm • Esc to cancel")
-
-	// Combine all views
-	formView := m.form.View()
-
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		formView,
-		errorView,
-		helpText,
-	)
+	return frame.render()
 }

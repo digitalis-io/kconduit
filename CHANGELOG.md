@@ -46,6 +46,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The create-topic form is now a framed, centred dialog matching the rest of the
+  app: labels in their own column, one line of guidance under the field being
+  filled in, and a summary spelling out what Create will do with the defaults
+  applied. Fields are validated as they are typed rather than one error at a
+  time on submit, and Create stays dimmed until the form is complete. The
+  replication factor is checked against the cluster's broker count, which is
+  fetched as the form opens.
+- The three ACL dialogs share that framing. They keep their huh forms, which do
+  the operations multi-select well, but are now dressed in the application
+  palette instead of hardcoded colours and carry a plain-English summary of the
+  rule — "User:alice may read on topic \"orders\"" — rather than leaving the
+  reader to assemble it from seven field names. The edit dialog spells out that
+  it replaces the rule, because Kafka has no in-place update, and the delete
+  dialog shows both the sentence and the exact field values it is about to
+  remove.
+- Gemini credentials are read from `GOOGLE_API_KEY` as well as
+  `GEMINI_API_KEY`, so a shell already set up for the Google Cloud SDKs works
+  without re-exporting. `GEMINI_API_KEY` wins when both are set.
+- Sub-views are given the terminal size when they are opened. A dialog is
+  created between resizes, so it never saw a window-size message of its own
+  until the terminal happened to change, and was laid out for a zero-width
+  screen until then.
 - Go toolchain raised to 1.27.0, in `go.mod`, the Dockerfile, and both GitHub
   Actions workflows.
 - Confirmations for create, edit, and delete now appear as a transient

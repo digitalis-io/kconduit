@@ -48,7 +48,9 @@ func fetchGroupLag(client *kafka.Client, groupID string) tea.Cmd {
 	}
 }
 
-func NewGroupLagModel(client *kafka.Client, groupID string) GroupLagModel {
+// NewGroupLagModel builds the lag breakdown. width and height come from the
+// view that opened it, for the reason given on NewCreateTopicModel.
+func NewGroupLagModel(client *kafka.Client, groupID string, width, height int) GroupLagModel {
 	t := table.New(
 		table.WithColumns(groupLagColumns),
 		table.WithFocused(true),
@@ -66,12 +68,17 @@ func NewGroupLagModel(client *kafka.Client, groupID string) GroupLagModel {
 	st.sortCol = 4
 	st.sortDesc = true
 
+	t.SetWidth(max(width-4, 20))
+	t.SetHeight(max(height-12, 3))
+
 	return GroupLagModel{
 		client:  client,
 		groupID: groupID,
 		table:   t,
 		state:   st,
 		loading: true,
+		width:   width,
+		height:  height,
 	}
 }
 

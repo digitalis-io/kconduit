@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -25,9 +24,13 @@ type DeleteACLModel struct {
 	confirm  bool
 }
 
-func NewDeleteACLModel(client *kafka.Client, acl kafka.ACL) *DeleteACLModel {
+// NewDeleteACLModel builds the delete confirmation. width and height come from
+// the view that opened it, for the reason given on NewCreateTopicModel.
+func NewDeleteACLModel(client *kafka.Client, acl kafka.ACL, width, height int) *DeleteACLModel {
 	m := &DeleteACLModel{
 		client:  client,
+		width:   width,
+		height:  height,
 		acl:     acl,
 		confirm: false,
 	}
@@ -35,7 +38,7 @@ func NewDeleteACLModel(client *kafka.Client, acl kafka.ACL) *DeleteACLModel {
 	// Create spinner
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	s.Style = lipgloss.NewStyle().Foreground(theme.Primary)
 	m.spinner = s
 
 	// Build the form
@@ -45,46 +48,27 @@ func NewDeleteACLModel(client *kafka.Client, acl kafka.ACL) *DeleteACLModel {
 }
 
 func (m *DeleteACLModel) buildForm() {
-	theme := huh.ThemeCharm()
-	theme.Focused.Title = theme.Focused.Title.Foreground(lipgloss.Color("205"))
-
+	// The ACL being deleted is described by the frame, so the form is only the
+	// confirmation. It used to be a note repeating all seven fields followed by
+	// a confirm, which made the dialog scroll on a short terminal.
 	m.form = huh.NewForm(
 		huh.NewGroup(
-			huh.NewNote().
-				Title("🗑️  Delete ACL").
-				Description(fmt.Sprintf(
-					"Are you sure you want to delete this ACL?\n\n"+
-						"Principal: %s\n"+
-						"Host: %s\n"+
-						"Resource: %s %s\n"+
-						"Pattern: %s\n"+
-						"Operation: %s\n"+
-						"Permission: %s\n\n"+
-						"⚠️  This action cannot be undone!",
-					m.acl.Principal,
-					m.acl.Host,
-					m.acl.ResourceType,
-					m.acl.ResourceName,
-					m.acl.PatternType,
-					m.acl.Operation,
-					m.acl.PermissionType,
-				)),
-
 			huh.NewConfirm().
 				Title("Delete this ACL?").
-				Description("Press Enter to confirm deletion, or Esc to cancel").
-				Affirmative("Yes, Delete").
+				Description("This cannot be undone.").
+				Affirmative("Delete").
 				Negative("Cancel").
 				Value(&m.confirm),
 		),
 	)
 
+	frame := aclFrame{width: m.width}
 	m.form = m.form.
-		WithTheme(theme).
+		WithTheme(aclHuhTheme()).
 		WithShowHelp(true).
 		WithShowErrors(true).
-		WithWidth(m.width - 4).
-		WithHeight(m.height - 8)
+		WithWidth(frame.boxWidth() - 6).
+		WithHeight(6)
 }
 
 func (m *DeleteACLModel) Init() tea.Cmd {
@@ -127,7 +111,10 @@ func (m *DeleteACLModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		// Update form dimensions without rebuilding
 		if m.form != nil {
-			m.form = m.form.WithWidth(m.width - 4).WithHeight(m.height - 8)
+			frame := aclFrame{width: m.width}
+			m.form = m.form.
+				WithWidth(frame.boxWidth() - 6).
+				WithHeight(aclFormHeight(m.height))
 		}
 		return m, nil
 
@@ -216,60 +203,26 @@ func (m *DeleteACLModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *DeleteACLModel) View() string {
-	// Check success state first to avoid showing error during transition
-	if m.success {
-		successStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("42")).
-			Bold(true).
-			Padding(2, 4)
-		return successStyle.Render("✅ ACL deleted successfully!")
+	frame := aclFrame{
+		title:   "Delete ACL",
+		summary: aclSummary(m.acl) + "\n\n" + aclFieldTable(m.acl),
+		form:    m.form.View(),
+		help:    []string{"tab", "switch", "enter", "confirm", "esc", "cancel"},
+		danger:  true,
+		width:   m.width,
+		height:  m.height,
 	}
 
-	if m.deleting {
-		return lipgloss.NewStyle().
-			Padding(2, 4).
-			Render(fmt.Sprintf("%s Deleting ACL...\n\nPrincipal: %s\nResource: %s %s\nOperation: %s",
-				m.spinner.View(),
-				m.acl.Principal,
-				m.acl.ResourceType,
-				m.acl.ResourceName,
-				m.acl.Operation))
+	switch {
+	case m.success:
+		frame.form = successStyle.Render("✓  Deleted")
+		frame.help = []string{"esc", "back"}
+	case m.deleting:
+		frame.form = aclProgress(m.spinner.View(), "Deleting the ACL…")
+		frame.help = []string{"esc", "cancel"}
+	case m.err != nil:
+		frame.status = errorStyle.Render("✗  " + m.err.Error())
 	}
 
-	// Error display
-	var errorView string
-	if m.err != nil {
-		errorStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
-			Bold(true).
-			Padding(1, 2)
-		errorView = errorStyle.Render(fmt.Sprintf("❌ Error: %v", m.err))
-	}
-
-	// Title
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("196")).
-		MarginBottom(1).
-		Padding(0, 2)
-
-	title := titleStyle.Render("🗑️  Delete Access Control List")
-
-	// Help text
-	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		Padding(0, 2)
-
-	helpText := helpStyle.Render("Use Tab to navigate • Enter to confirm • Esc to cancel")
-
-	// Combine all views
-	formView := m.form.View()
-
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		formView,
-		errorView,
-		helpText,
-	)
+	return frame.render()
 }

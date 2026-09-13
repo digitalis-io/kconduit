@@ -513,12 +513,12 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "C":
 			if m.activeTab == ACLsTab {
 				// Create ACL
-				m.createACLModel = NewCreateACLHuhModel(m.client)
+				m.createACLModel = NewCreateACLHuhModel(m.client, m.width, m.height)
 				m.mode = CreateACLView
 				return m, m.createACLModel.Init()
 			} else {
 				// Create Topic
-				m.createTopicModel = NewCreateTopicModel(m.client)
+				m.createTopicModel = NewCreateTopicModel(m.client, m.width, m.height)
 				m.mode = CreateTopicView
 				return m, m.createTopicModel.Init()
 			}
@@ -556,7 +556,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 						PermissionType: selectedRow[5], // Permission
 						Host:           selectedRow[6], // Host
 					}
-					m.deleteACLModel = NewDeleteACLModel(m.client, selectedACL)
+					m.deleteACLModel = NewDeleteACLModel(m.client, selectedACL, m.width, m.height)
 					m.mode = DeleteACLView
 					return m, m.deleteACLModel.Init()
 				}
@@ -603,7 +603,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 						PermissionType: selectedRow[5],
 						Host:           selectedRow[6],
 					}
-					m.editACLModel = NewEditACLHuhModel(m.client, selectedACL)
+					m.editACLModel = NewEditACLHuhModel(m.client, selectedACL, m.width, m.height)
 					m.mode = EditACLView
 					return m, m.editACLModel.Init()
 				}
@@ -613,7 +613,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeTab == ConsumerGroupsTab {
 				selectedRow := m.consumersTable.SelectedRow()
 				if len(selectedRow) > 0 {
-					m.groupLagModel = NewGroupLagModel(m.client, selectedRow[0])
+					m.groupLagModel = NewGroupLagModel(m.client, selectedRow[0], m.width, m.height)
 					m.mode = GroupLagView
 					return m, m.groupLagModel.Init()
 				}

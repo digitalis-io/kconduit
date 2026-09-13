@@ -122,7 +122,7 @@ export OPENAI_API_KEY="your-api-key"
 ./kconduit -b localhost:9092 --ai-engine openai --ai-model gpt-4
 
 # Using Google Gemini
-export GEMINI_API_KEY="your-api-key"
+export GEMINI_API_KEY="your-api-key"   # or GOOGLE_API_KEY
 ./kconduit -b localhost:9092 --ai-engine gemini --ai-model gemini-3.1-pro-preview
 
 # Using Anthropic Claude
@@ -182,6 +182,10 @@ You can also open the Session Manager interactively at any time by pressing `s` 
 - `C` - Create new topic
 - `D` - Delete selected topic (with confirmation)
 - `e` - Edit topic configuration
+
+The create-topic dialog validates as you type, shows a summary of exactly what
+will be created including the defaults for any field left blank, and checks the
+replication factor against the number of brokers in the cluster.
 - `y` - Copy the selected config value when the configuration panel is focused
 
 The topic table shows message count and on-disk size per topic. Both are
@@ -215,9 +219,17 @@ size is the total across every replica, so a 1 GiB topic with replication factor
 - `↑/↓` - Navigate through ACL entries
 - `C` - Create new ACL
 - `e` - Edit selected ACL
-- `Tab` - Navigate between fields in create/edit dialog
-- `Enter/Ctrl+S` - Save ACL changes
-- `Esc` - Cancel/Return to ACL list
+- `d` - Delete selected ACL (with confirmation)
+- `Tab` / `Shift+Tab` - Navigate between fields in the create/edit dialog
+- `Space` - Select an operation in the multi-select
+- `Enter` - Confirm
+- `Esc` - Cancel / return to the ACL list
+
+Each dialog shows the rule in plain English as you fill it in — for example
+`User:alice may read on topic "orders" from host *` — so the effect is readable
+without assembling it from the individual fields. Editing an ACL deletes the
+existing rule and creates the replacement, because Kafka has no in-place update;
+the dialog says so before you save.
 
 ## 🤖 AI Assistant Commands
 
@@ -282,6 +294,7 @@ Press `A` from any screen to open the AI assistant. For full provider setup and 
 | `OPENAI_API_KEY` | OpenAI API key for AI assistant | - |
 | `OPENAI_MODEL` | OpenAI model to use | gpt-3.5-turbo |
 | `GEMINI_API_KEY` | Google Gemini API key | - |
+| `GOOGLE_API_KEY` | Accepted in place of `GEMINI_API_KEY`; `GEMINI_API_KEY` wins if both are set | - |
 | `GEMINI_MODEL` | Gemini model to use | gemini-3.1-pro-preview |
 | `ANTHROPIC_API_KEY` | Anthropic API key | - |
 | `ANTHROPIC_MODEL` | Claude model to use | claude-3-haiku-20240307 |
