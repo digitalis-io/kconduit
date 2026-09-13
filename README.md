@@ -1,10 +1,20 @@
+<p align="center">
+  <a href="https://digitalis.io">
+    <img src="https://digitalis-marketplace-assets.s3.us-east-1.amazonaws.com/DigitalisDigital_DigitalisFullLogoGradient+-+medium.png" alt="Digitalis.IO" width="300">
+  </a>
+</p>
+
+<p align="center">
+  <em>Built and maintained by <a href="https://digitalis.io">Digitalis.IO</a></em>
+</p>
+
 # KConduit — Kafka Terminal UI with AI Assistant
 
 > ⚠️ **BETA RELEASE** - This software is in beta. While functional, it may contain bugs or unexpected behaviors. Please use with caution in production environments.
 
 **KConduit** is an open-source Kafka CLI and terminal UI (TUI) for Apache Kafka management, built with Go and [Charm's Bubble Tea](https://github.com/charmbracelet/bubbletea) framework. It provides a fast, keyboard-driven alternative to web-based Kafka GUI tools, with a built-in AI assistant that accepts natural language commands for topic management, consumer group monitoring, and cluster operations — no browser required.
 
-[![Go Version](https://img.shields.io/badge/go-1.24%2B-blue)](https://golang.org/dl/)
+[![Go Version](https://img.shields.io/badge/go-1.27%2B-blue)](https://golang.org/dl/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/digitalis-io/kconduit)](https://github.com/digitalis-io/kconduit/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/digitalis-io/kconduit)](https://goreportcard.com/report/github.com/digitalis-io/kconduit)
@@ -430,6 +440,11 @@ This project is licensed under the Apache License 2.0 — see the [LICENSE](LICE
 - Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) by Charm
 - Uses [Sarama](https://github.com/IBM/sarama) for Kafka client operations
 - AI providers: OpenAI, Google Gemini, Anthropic, and Ollama
+
+## 💬 Support
+
+This project is maintained by [Digitalis.io](https://digitalis.io). For support,
+visit [digitalis.io/contact](https://digitalis.io/contact).
 
 ## 📄 Legal Notices
 

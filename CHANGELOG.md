@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   seconds. The status bar shows `⟳ auto` while it is on.
 - `g` and `G` jump to the first and last row of the focused table.
 
+### Fixed
+
+- `filterRows` returned the caller's own slice when no filter was applied, which
+  `applyView` then sorted in place — quietly reordering the master row list each
+  tab documents as unfiltered and unsorted. It now always returns a copy.
+  (#9)
+
 ### Security
 
 - Control characters are stripped from every value the cluster supplies —

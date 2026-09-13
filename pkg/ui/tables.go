@@ -88,9 +88,16 @@ func (s tableState) applyView(rows []table.Row) []table.Row {
 }
 
 // filterRows keeps rows where any cell contains query.
+//
+// It always returns a new slice, even when nothing is filtered out. Returning
+// the caller's slice would alias it: applyView sorts the result in place, and
+// the callers in model_rows.go hold the same backing array as their master
+// "unfiltered, unsorted" list, which a sort would then silently reorder.
 func filterRows(rows []table.Row, query string) []table.Row {
 	if query == "" {
-		return rows
+		out := make([]table.Row, len(rows))
+		copy(out, rows)
+		return out
 	}
 	out := make([]table.Row, 0, len(rows))
 	for _, row := range rows {

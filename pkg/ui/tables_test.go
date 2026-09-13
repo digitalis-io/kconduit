@@ -204,3 +204,36 @@ func TestStopFilterCanKeepOrDiscardTheQuery(t *testing.T) {
 		t.Errorf("stopFilter(true) left the query %q in place", cleared.filter.Value())
 	}
 }
+
+func TestApplyViewLeavesTheCallersRowsAlone(t *testing.T) {
+	// The master lists in model_rows.go are documented as unfiltered and
+	// unsorted. applyView sorts in place, so if it returned the caller's own
+	// slice, sorting a column would quietly reorder the master list too.
+	s := newTableState("filter…")
+	s.sortCol = 1
+
+	rows := rowsOf(
+		[]string{"b", "2"},
+		[]string{"a", "1"},
+	)
+	before := firstColumn(rows)
+
+	view := s.applyView(rows)
+
+	if got := firstColumn(rows); !equal(got, before) {
+		t.Errorf("applyView reordered the caller's rows: %v, want %v", got, before)
+	}
+	if got, want := firstColumn(view), []string{"a", "b"}; !equal(got, want) {
+		t.Errorf("returned view = %v, want %v", got, want)
+	}
+}
+
+func TestFilterRowsWithNoQueryReturnsACopy(t *testing.T) {
+	rows := rowsOf([]string{"a"}, []string{"b"})
+	out := filterRows(rows, "")
+
+	out[0] = table.Row{"mutated"}
+	if rows[0][0] != "a" {
+		t.Errorf("writing to the filtered slice changed the caller's rows: %q", rows[0][0])
+	}
+}
