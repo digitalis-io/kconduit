@@ -19,7 +19,7 @@
 [![Release](https://img.shields.io/github/v/release/digitalis-io/kconduit)](https://github.com/digitalis-io/kconduit/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/digitalis-io/kconduit)](https://goreportcard.com/report/github.com/digitalis-io/kconduit)
 
-[![KConduit — Kafka TUI demo showing topic management and AI assistant](https://img.youtube.com/vi/hAkpIQncFuw/maxresdefault.jpg)](https://youtu.be/hAkpIQncFuw)
+[![KConduit — Kafka TUI demo showing topic management and AI assistant](https://img.youtube.com/vi/ga-jU919MuI/maxresdefault.jpg)](https://youtu.be/ga-jU919MuI)
 
 ## ✨ Features
 
