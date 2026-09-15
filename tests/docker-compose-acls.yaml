@@ -109,7 +109,11 @@ services:
       - controller-2
       - controller-3
     healthcheck:
-      test: ["CMD-SHELL", "./opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 --command-config /opt/kafka/config/client.properties > /dev/null 2>&1"]
+      # broker-1:9094 rather than localhost:9092: the BROKER_HOST listener is
+      # advertised as localhost:<published port>, which does not resolve inside
+      # the container, so every metadata refresh here retried against a port
+      # nothing is listening on.
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server broker-1:9094 --command-config /opt/kafka/config/client.properties > /dev/null 2>&1"]
       interval: 10s
       timeout: 10s
       retries: 5
@@ -155,7 +159,11 @@ services:
       - controller-2
       - controller-3
     healthcheck:
-      test: ["CMD-SHELL", "./opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 --command-config /opt/kafka/config/client.properties > /dev/null 2>&1"]
+      # broker-2:9094 rather than localhost:9092: the BROKER_HOST listener is
+      # advertised as localhost:<published port>, which does not resolve inside
+      # the container, so every metadata refresh here retried against a port
+      # nothing is listening on.
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server broker-2:9094 --command-config /opt/kafka/config/client.properties > /dev/null 2>&1"]
       interval: 10s
       timeout: 10s
       retries: 5
@@ -201,7 +209,11 @@ services:
       - controller-2
       - controller-3
     healthcheck:
-      test: ["CMD-SHELL", "./opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 --command-config /opt/kafka/config/client.properties > /dev/null 2>&1"]
+      # broker-3:9094 rather than localhost:9092: the BROKER_HOST listener is
+      # advertised as localhost:<published port>, which does not resolve inside
+      # the container, so every metadata refresh here retried against a port
+      # nothing is listening on.
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server broker-3:9094 --command-config /opt/kafka/config/client.properties > /dev/null 2>&1"]
       interval: 10s
       timeout: 10s
       retries: 5

@@ -1,3 +1,13 @@
+<p align="center">
+  <a href="https://digitalis.io">
+    <img src="https://digitalis-marketplace-assets.s3.us-east-1.amazonaws.com/DigitalisDigital_DigitalisFullLogoGradient+-+medium.png" alt="Digitalis.IO" width="300">
+  </a>
+</p>
+
+<p align="center">
+  <em>Built and maintained by <a href="https://digitalis.io">Digitalis.IO</a></em>
+</p>
+
 # KConduit AI Assistant — Natural Language Kafka Management
 
 KConduit includes a built-in AI assistant that lets you manage Apache Kafka clusters using plain English commands directly from the terminal UI. This page documents all supported providers, configuration options, and example commands.
@@ -42,7 +52,7 @@ export OPENAI_MODEL="gpt-3.5-turbo"  # Optional, defaults to gpt-3.5-turbo
 
 ### 2. Google Gemini
 ```bash
-export GEMINI_API_KEY="your-api-key-here"
+export GEMINI_API_KEY="your-api-key-here"   # or GOOGLE_API_KEY
 export GEMINI_MODEL="gemini-3.1-pro-preview"  # Optional, defaults to gemini-3.1-pro-preview
 ./kconduit -b localhost:9092
 # Or override with command-line
@@ -137,6 +147,7 @@ Configuration options are applied in the following order (highest priority first
 | `OPENAI_API_KEY` | OpenAI API key for ChatGPT | - |
 | `OPENAI_MODEL` | OpenAI model to use | gpt-3.5-turbo |
 | `GEMINI_API_KEY` | Google Gemini API key | - |
+| `GOOGLE_API_KEY` | Accepted in place of `GEMINI_API_KEY`; `GEMINI_API_KEY` wins if both are set | - |
 | `GEMINI_MODEL` | Gemini model to use | gemini-3.1-pro-preview |
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude | - |
 | `ANTHROPIC_MODEL` | Claude model to use | claude-3-haiku-20240307 |
@@ -175,3 +186,8 @@ The AI assistant detects and parses natural language commands for the following 
 - The AI assistant parses JSON responses and executes Kafka operations automatically
 - Topic creation happens immediately after the AI parses the command successfully
 - Topic deletion is intentionally blocked in the AI assistant — use the `D` key in the Topics tab instead
+
+## 💬 Support
+
+This project is maintained by [Digitalis.io](https://digitalis.io). For support,
+visit [digitalis.io/contact](https://digitalis.io/contact).

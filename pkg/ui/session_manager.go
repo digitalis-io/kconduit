@@ -5,28 +5,28 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/digitalis-io/kconduit/pkg/config"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/digitalis-io/kconduit/pkg/config"
 )
 
 type sessionManagerState int
 
 const (
 	smStateList     sessionManagerState = iota
-	smStateForm                          // create or edit
-	smStateDelete                        // inline delete confirmation
-	smStatePassword                      // password prompt before connect
+	smStateForm                         // create or edit
+	smStateDelete                       // inline delete confirmation
+	smStatePassword                     // password prompt before connect
 )
 
 // SessionManagerModel handles the in-TUI session management view.
 // It is embedded as a value in the main Model struct.
 type SessionManagerModel struct {
-	state   sessionManagerState
-	table   table.Model
-	names   []string
+	state    sessionManagerState
+	table    table.Model
+	names    []string
 	sessions map[string]config.Session
 
 	form          *SessionFormModel

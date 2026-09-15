@@ -6,11 +6,11 @@ import (
 	"os"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/digitalis-io/kconduit/pkg/config"
 	"github.com/digitalis-io/kconduit/pkg/kafka"
 	"github.com/digitalis-io/kconduit/pkg/logger"
 	"github.com/digitalis-io/kconduit/pkg/ui"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )

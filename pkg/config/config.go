@@ -1,3 +1,11 @@
+// Package config manages kconduit's saved connection sessions.
+//
+// A Session bundles the brokers, SASL, and TLS settings needed to reconnect
+// to a cluster, and is persisted as YAML under
+// ~/.config/kconduit/sessions.yaml (see ConfigPath). Session has no field for
+// a plaintext password: SessionSASL carries a PasswordFile path instead, so a
+// password entered at runtime stays in memory for the life of the process and
+// is never written to disk by Save.
 package config
 
 import (

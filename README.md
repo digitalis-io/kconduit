@@ -1,15 +1,25 @@
+<p align="center">
+  <a href="https://digitalis.io">
+    <img src="https://digitalis-marketplace-assets.s3.us-east-1.amazonaws.com/DigitalisDigital_DigitalisFullLogoGradient+-+medium.png" alt="Digitalis.IO" width="300">
+  </a>
+</p>
+
+<p align="center">
+  <em>Built and maintained by <a href="https://digitalis.io">Digitalis.IO</a></em>
+</p>
+
 # KConduit — Kafka Terminal UI with AI Assistant
 
 > ⚠️ **BETA RELEASE** - This software is in beta. While functional, it may contain bugs or unexpected behaviors. Please use with caution in production environments.
 
 **KConduit** is an open-source Kafka CLI and terminal UI (TUI) for Apache Kafka management, built with Go and [Charm's Bubble Tea](https://github.com/charmbracelet/bubbletea) framework. It provides a fast, keyboard-driven alternative to web-based Kafka GUI tools, with a built-in AI assistant that accepts natural language commands for topic management, consumer group monitoring, and cluster operations — no browser required.
 
-[![Go Version](https://img.shields.io/badge/go-1.24%2B-blue)](https://golang.org/dl/)
+[![Go Version](https://img.shields.io/badge/go-1.27%2B-blue)](https://golang.org/dl/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/digitalis-io/kconduit)](https://github.com/digitalis-io/kconduit/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/digitalis-io/kconduit)](https://goreportcard.com/report/github.com/digitalis-io/kconduit)
 
-[![KConduit — Kafka TUI demo showing topic management and AI assistant](https://img.youtube.com/vi/bRF6hGm72gM/maxresdefault.jpg)](https://youtu.be/bRF6hGm72gM)
+[![KConduit — Kafka TUI demo showing topic management and AI assistant](https://img.youtube.com/vi/hAkpIQncFuw/maxresdefault.jpg)](https://youtu.be/hAkpIQncFuw)
 
 ## ✨ Features
 
@@ -19,8 +29,12 @@
 - 🎯 **Topic Management** - Create, configure, and delete Kafka topics with safety confirmations
 - 📨 **Message Operations** - Produce and consume Kafka messages with formatted display
 - ⚙️ **Configuration Editor** - View and modify topic configurations in real-time
-- 👥 **Consumer Group Monitoring** - Track consumer groups with lag calculation
-- 🔄 **Auto-Refresh** - Real-time updates of cluster state
+- 👥 **Consumer Group Monitoring** - Track consumer groups with lag calculation, and drill into per-partition lag
+- 📈 **Topic Metrics** - Message counts and on-disk size per topic, alongside partitions and replication factor
+- 🔍 **Filter and Sort** - Narrow any table with `/` and re-order it by any column
+- 🔄 **Auto-Refresh** - Toggle a live 5-second refresh of the current tab with `Ctrl+R`
+- 📋 **Clipboard** - Copy the selected row, or a config value, with `y`
+- ❓ **Built-in Help** - Press `?` for the full keyboard reference without leaving the app
 
 ### AI Assistant for Kafka
 - 🤖 **Natural Language Commands** - Manage Kafka using plain English instead of CLI flags
@@ -118,7 +132,7 @@ export OPENAI_API_KEY="your-api-key"
 ./kconduit -b localhost:9092 --ai-engine openai --ai-model gpt-4
 
 # Using Google Gemini
-export GEMINI_API_KEY="your-api-key"
+export GEMINI_API_KEY="your-api-key"   # or GOOGLE_API_KEY
 ./kconduit -b localhost:9092 --ai-engine gemini --ai-model gemini-3.1-pro-preview
 
 # Using Anthropic Claude
@@ -154,10 +168,21 @@ You can also open the Session Manager interactively at any time by pressing `s` 
 ### Global Navigation
 - `Tab` / `Shift+Tab` - Cycle forward/backward through tabs (Brokers, Topics, Consumer Groups, ACLs)
 - `1-4` - Jump directly to a tab by number
+- `↑/↓` - Move the selection
+- `g` / `G` - Jump to the first or last row
+- `/` - Filter the current table; `Enter` keeps the filter, `Esc` clears it
+- `<` / `>` - Step the sort order (each column has an ascending and a descending place)
+- `y` - Copy the selected row to the clipboard
 - `r` / `R` - Refresh current view
+- `Ctrl+R` - Toggle auto-refresh of the current tab (every 5 seconds)
+- `?` / `F1` - Open the keyboard reference
 - `A` / `a` - Open AI Assistant
 - `s` / `S` - Open Session Manager
+- `Esc` - Close an overlay, or clear the current filter
 - `q` or `Ctrl+C` - Quit application
+
+### Brokers Tab
+- `Enter` - Show full detail for the selected broker (address, role, rack, API version, listeners, log directories)
 
 ### Topics Tab
 - `↑/↓` - Navigate through topics
@@ -167,6 +192,22 @@ You can also open the Session Manager interactively at any time by pressing `s` 
 - `C` - Create new topic
 - `D` - Delete selected topic (with confirmation)
 - `e` - Edit topic configuration
+
+The create-topic dialog validates as you type, shows a summary of exactly what
+will be created including the defaults for any field left blank, and checks the
+replication factor against the number of brokers in the cluster.
+- `y` - Copy the selected config value when the configuration panel is focused
+
+The topic table shows message count and on-disk size per topic. Both are
+measured after the list appears — they show `…` until they arrive. Message count
+is the number of records currently retained, not everything ever produced. Disk
+size is the total across every replica, so a 1 GiB topic with replication factor
+3 reports 3 GiB.
+
+### Consumer Groups Tab
+- `↑/↓` - Navigate through consumer groups
+- `Enter` - Break the group's lag down by partition (committed offset, log end offset, lag, owning member)
+- `/`, `<` / `>`, `g` / `G`, `y` - Filter, sort, jump, and copy, as in every other table
 
 ### Consumer Mode
 - `↑/↓` or `PgUp/PgDn` - Scroll through messages
@@ -188,9 +229,17 @@ You can also open the Session Manager interactively at any time by pressing `s` 
 - `↑/↓` - Navigate through ACL entries
 - `C` - Create new ACL
 - `e` - Edit selected ACL
-- `Tab` - Navigate between fields in create/edit dialog
-- `Enter/Ctrl+S` - Save ACL changes
-- `Esc` - Cancel/Return to ACL list
+- `d` - Delete selected ACL (with confirmation)
+- `Tab` / `Shift+Tab` - Navigate between fields in the create/edit dialog
+- `Space` - Select an operation in the multi-select
+- `Enter` - Confirm
+- `Esc` - Cancel / return to the ACL list
+
+Each dialog shows the rule in plain English as you fill it in — for example
+`User:alice may read on topic "orders" from host *` — so the effect is readable
+without assembling it from the individual fields. Editing an ACL deletes the
+existing rule and creates the replacement, because Kafka has no in-place update;
+the dialog says so before you save.
 
 ## 🤖 AI Assistant Commands
 
@@ -255,6 +304,7 @@ Press `A` from any screen to open the AI assistant. For full provider setup and 
 | `OPENAI_API_KEY` | OpenAI API key for AI assistant | - |
 | `OPENAI_MODEL` | OpenAI model to use | gpt-3.5-turbo |
 | `GEMINI_API_KEY` | Google Gemini API key | - |
+| `GOOGLE_API_KEY` | Accepted in place of `GEMINI_API_KEY`; `GEMINI_API_KEY` wins if both are set | - |
 | `GEMINI_MODEL` | Gemini model to use | gemini-3.1-pro-preview |
 | `ANTHROPIC_API_KEY` | Anthropic API key | - |
 | `ANTHROPIC_MODEL` | Claude model to use | claude-3-haiku-20240307 |
@@ -287,7 +337,7 @@ Press `A` from any screen to open the AI assistant. For full provider setup and 
 ## 🏗️ Building & Development
 
 ### Requirements
-- Go 1.24+
+- Go 1.27+
 - Access to a Kafka cluster
 
 ### Build Commands
@@ -301,10 +351,22 @@ make run
 # Clean build artifacts
 make clean
 
-# Run with test Kafka cluster
-docker-compose -f tests/docker-compose.yaml up -d
-./kconduit -b localhost:19092
+# Start a local test cluster and connect to it
+make kafka-up        # plaintext, no ACLs
+make run-plain
+
+# Or the SASL cluster with ACLs enabled
+make kafka-acls-up
+make run-acls
+
+# Stop them again
+make kafka-down
+make kafka-acls-down
 ```
+
+The two clusters publish some of the same ports, so only one can run at a time;
+`make kafka-up` and `make kafka-acls-up` each refuse to start if the other is
+already up. `make help` lists every target.
 
 ## 🔒 Safety Features
 
@@ -378,6 +440,11 @@ This project is licensed under the Apache License 2.0 — see the [LICENSE](LICE
 - Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) by Charm
 - Uses [Sarama](https://github.com/IBM/sarama) for Kafka client operations
 - AI providers: OpenAI, Google Gemini, Anthropic, and Ollama
+
+## 💬 Support
+
+This project is maintained by [Digitalis.io](https://digitalis.io). For support,
+visit [digitalis.io/contact](https://digitalis.io/contact).
 
 ## 📄 Legal Notices
 

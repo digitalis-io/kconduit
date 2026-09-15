@@ -3,9 +3,9 @@ package ui
 import (
 	"fmt"
 
-	"github.com/digitalis-io/kconduit/pkg/config"
-	"github.com/charmbracelet/huh"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/huh"
+	"github.com/digitalis-io/kconduit/pkg/config"
 )
 
 // sessionFormDoneMsg is emitted when the session form completes or is cancelled.
@@ -22,9 +22,9 @@ type SessionFormModel struct {
 	form     *huh.Form
 	isEdit   bool
 	editName string // original name when editing (for rename detection)
-	width  int
-	height int
-	done   bool
+	width    int
+	height   int
+	done     bool
 
 	// form field values — pointers so huh can bind directly
 	name         string

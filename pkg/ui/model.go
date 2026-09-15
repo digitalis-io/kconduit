@@ -1,3 +1,14 @@
+// Package ui implements kconduit's terminal UI with Bubble Tea.
+//
+// Model, in this file, is the top-level tea.Model: it owns the list-view
+// tables (topics, brokers, consumer groups, ACLs) and the current ViewMode,
+// and dispatches Update and View calls to the appropriate sub-view model
+// (ProducerModel, ConsumerModel, CreateTopicModel, and so on) when the mode
+// changes. Per-table view state — the active filter and sort column — lives
+// in tableState (tables.go), one instance per table, so filtering and
+// sorting logic is written once and reused across every table. Colors and
+// reusable lipgloss styles are centralized in the theme value (styles.go)
+// rather than being redefined per view.
 package ui
 
 import (
@@ -7,11 +18,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/digitalis-io/kconduit/pkg/kafka"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/digitalis-io/kconduit/pkg/kafka"
 )
 
 type ViewMode int
@@ -28,6 +39,7 @@ const (
 	EditACLView
 	DeleteACLView
 	SessionManagerView
+	GroupLagView
 )
 
 type TabView int
@@ -40,68 +52,73 @@ const (
 )
 
 type Model struct {
-	topicsTable      table.Model
-	brokersTable     table.Model
-	configTable      table.Model
-	consumersTable   table.Model
-	aclTable         *table.Model
-	client           *kafka.Client
-	topics           []kafka.TopicInfo
-	brokers          []kafka.BrokerInfo
-	consumerGroups   []kafka.ConsumerGroupInfo
-	acls             []kafka.ACL
-	topicConfig      *kafka.TopicConfig
-	clusterStats     *kafka.ClusterStats
-	err              error
-	loading          bool
-	loadingConfig    bool
-	width            int
-	height           int
-	mode             ViewMode
-	producerModel    ProducerModel
-	consumerModel    ConsumerModel
-	createTopicModel CreateTopicModel
-	createACLModel   *CreateACLHuhModel
-	editACLModel     EditACLHuhModel
-	deleteACLModel       *DeleteACLModel
-	editConfigModel      *EditConfigModel
-	aiAssistantModel     AIAssistantModel
-	deleteTopicModel     DeleteTopicModel
-	sessionManagerModel  SessionManagerModel
-	spinner              spinner.Model
-	selectedTopic        string
-	activeTab            TabView
-	focusedPanel         int // 0: topics list, 1: config table (when in Topics tab)
-	aiEngine             string
-	aiModel              string
-	activeSession        string
+	topicsTable         table.Model
+	brokersTable        table.Model
+	configTable         table.Model
+	consumersTable      table.Model
+	aclTable            *table.Model
+	client              *kafka.Client
+	topics              []kafka.TopicInfo
+	brokers             []kafka.BrokerInfo
+	consumerGroups      []kafka.ConsumerGroupInfo
+	acls                []kafka.ACL
+	topicConfig         *kafka.TopicConfig
+	clusterStats        *kafka.ClusterStats
+	err                 error
+	loading             bool
+	loadingConfig       bool
+	width               int
+	height              int
+	mode                ViewMode
+	producerModel       ProducerModel
+	consumerModel       ConsumerModel
+	createTopicModel    CreateTopicModel
+	createACLModel      *CreateACLHuhModel
+	editACLModel        EditACLHuhModel
+	deleteACLModel      *DeleteACLModel
+	editConfigModel     *EditConfigModel
+	aiAssistantModel    AIAssistantModel
+	deleteTopicModel    DeleteTopicModel
+	sessionManagerModel SessionManagerModel
+	spinner             spinner.Model
+	selectedTopic       string
+	activeTab           TabView
+	focusedPanel        int // 0: topics list, 1: config table (when in Topics tab)
+	aiEngine            string
+	aiModel             string
+	activeSession       string
+
+	// View state layered on top of the fetched data.
+	help          helpOverlay
+	toast         toast
+	tabStates     [4]tableState
+	groupLagModel GroupLagModel
+	brokerDetail  bool
+	autoRefresh   bool
+	loadingLabel  string
+
+	// Unfiltered, unsorted rows for each tab. The tables hold the filtered and
+	// sorted view of these, so changing a filter or a sort column never needs
+	// another round trip to the cluster.
+	topicRows    []table.Row
+	brokerRows   []table.Row
+	consumerRows []table.Row
+	aclRows      []table.Row
+
+	// topicMetrics arrives after the topic list, keyed by topic name.
+	// metricsInFlight stops a second measurement starting while one is running:
+	// auto-refresh ticks every five seconds, and on a large cluster a single
+	// pass takes longer than that.
+	topicMetrics    map[string]kafka.TopicMetrics
+	metricsInFlight bool
 }
 
 func NewModel(client *kafka.Client, aiEngine string, aiModel string, activeSession string) Model {
-	// Topics table
-	topicsColumns := []table.Column{
-		{Title: "Topic Name", Width: 30},
-		{Title: "Parts", Width: 8},
-		{Title: "RF", Width: 4},
-	}
-
 	topicsTable := table.New(
 		table.WithColumns(topicsColumns),
 		table.WithFocused(false),
 		table.WithHeight(10),
 	)
-
-	// Brokers table with more detailed columns
-	brokersColumns := []table.Column{
-		{Title: "ID", Width: 4},
-		{Title: "Host", Width: 20},
-		{Title: "Port", Width: 6},
-		{Title: "Status", Width: 8},
-		{Title: "Version", Width: 8},
-		{Title: "Roles", Width: 20},
-		{Title: "Rack", Width: 10},
-		{Title: "Log Dirs", Width: 10},
-	}
 
 	brokersTable := table.New(
 		table.WithColumns(brokersColumns),
@@ -137,16 +154,6 @@ func NewModel(client *kafka.Client, aiEngine string, aiModel string, activeSessi
 
 	configTable.SetStyles(configStyles)
 
-	// Consumers table for consumer groups
-	consumersColumns := []table.Column{
-		{Title: "Group ID", Width: 25},
-		{Title: "Members", Width: 8},
-		{Title: "Topics", Width: 7},
-		{Title: "Lag", Width: 10},
-		{Title: "Coordinator", Width: 12},
-		{Title: "State", Width: 10},
-	}
-
 	consumersTable := table.New(
 		table.WithColumns(consumersColumns),
 		table.WithFocused(true),
@@ -166,11 +173,18 @@ func NewModel(client *kafka.Client, aiEngine string, aiModel string, activeSessi
 		client:         client,
 		spinner:        sp,
 		loading:        true,
+		loadingLabel:   "Connecting to the Kafka cluster…",
 		mode:           ListView,
 		activeTab:      BrokersTab,
 		aiEngine:       aiEngine,
 		aiModel:        aiModel,
 		activeSession:  activeSession,
+		tabStates: [4]tableState{
+			BrokersTab:        newTableState("filter brokers…"),
+			TopicsTab:         newTableState("filter topics…"),
+			ConsumerGroupsTab: newTableState("filter groups…"),
+			ACLsTab:           newTableState("filter ACLs…"),
+		},
 	}
 }
 
@@ -206,8 +220,12 @@ type aclsMsg struct {
 	err  error
 }
 
+// ViewChangedMsg returns from a sub-view to a particular tab of the list.
+// Notice, when set, is toasted over the list once it is showing again.
 type ViewChangedMsg struct {
-	View TabView
+	View   TabView
+	Notice string
+	Level  toastLevel
 }
 
 func fetchTopics(client *kafka.Client) tea.Cmd {
@@ -284,6 +302,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateDeleteACLView(msg)
 	case SessionManagerView:
 		return m.updateSessionManagerView(msg)
+	case GroupLagView:
+		return m.updateGroupLagView(msg)
 	default:
 		return m.updateListView(msg)
 	}
@@ -305,9 +325,84 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(fetchTopics(m.client), fetchBrokers(m.client), m.spinner.Tick)
 
 	case tea.KeyMsg:
+		// The help window is drawn over the list, so it takes every key while
+		// it is open rather than letting them fall through to the table
+		// underneath.
+		if m.help.active {
+			m.help, _ = m.help.Update(msg, m.height)
+			return m, nil
+		}
+
+		// A focused filter input likewise swallows keys: while it has focus,
+		// "d" is a letter being typed, not the delete binding.
+		if m.tabStates[m.activeTab].filtering {
+			return m.updateFilterKey(msg)
+		}
+
 		switch s := msg.String(); s {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "?", "f1":
+			m.help.active = true
+			m.help.scroll = 0
+			return m, nil
+		case "/":
+			state, cmd := m.tabStates[m.activeTab].startFilter()
+			m.tabStates[m.activeTab] = state
+			return m, cmd
+		case "esc":
+			// One key that undoes whatever narrowing is in effect.
+			if m.brokerDetail {
+				m.brokerDetail = false
+				return m, nil
+			}
+			if m.tabStates[m.activeTab].active() {
+				m.tabStates[m.activeTab] = m.tabStates[m.activeTab].stopFilter(true)
+				m.rebuildActiveTab()
+			}
+			return m, nil
+		case "<", ">":
+			delta := 1
+			if s == "<" {
+				delta = -1
+			}
+			m.tabStates[m.activeTab] = m.tabStates[m.activeTab].
+				moveSort(delta, len(columnsFor(m.activeTab)))
+			m.rebuildActiveTab()
+			return m, nil
+		case "g":
+			if t, ok := m.activeTable(); ok {
+				t.GotoTop()
+			}
+			return m, nil
+		case "G":
+			if t, ok := m.activeTable(); ok {
+				t.GotoBottom()
+			}
+			return m, nil
+		case "y":
+			// On the config table the value on its own is what anyone wants to
+			// paste; elsewhere the whole row is the useful unit.
+			if m.activeTab == TopicsTab && m.focusedPanel == 1 {
+				if row := m.configTable.SelectedRow(); len(row) == 2 {
+					return m, copyTextCmd(row[1], "config value")
+				}
+				return m, nil
+			}
+			if t, ok := m.activeTable(); ok {
+				return m, copyRowCmd(t.SelectedRow())
+			}
+			return m, nil
+		case "ctrl+r":
+			m.autoRefresh = !m.autoRefresh
+			if m.autoRefresh {
+				var cmd tea.Cmd
+				m.toast, cmd = m.toast.show(toastInfo, "Auto-refresh on (every 5s)")
+				return m, tea.Batch(cmd, autoRefreshTick())
+			}
+			var cmd tea.Cmd
+			m.toast, cmd = m.toast.show(toastInfo, "Auto-refresh off")
+			return m, cmd
 		case "tab":
 			// In Topics tab, switch between topics list and config table
 			if m.activeTab == TopicsTab && m.topicConfig != nil {
@@ -325,6 +420,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			// Otherwise move to next tab
+			m.blurActiveTab()
 			switch m.activeTab {
 			case BrokersTab:
 				m.brokersTable.Blur()
@@ -365,6 +461,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			// Otherwise move to previous tab
+			m.blurActiveTab()
 			switch m.activeTab {
 			case BrokersTab:
 				m.brokersTable.Blur()
@@ -389,64 +486,50 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Trigger refresh when switching tabs
 			return m, tea.Batch(fetchTopics(m.client), fetchBrokers(m.client))
 		case "1":
-			// Switch to Brokers tab
-			if m.activeTab == TopicsTab {
-				m.topicsTable.Blur()
-			}
+			m.blurActiveTab()
 			m.activeTab = BrokersTab
 			m.brokersTable.Focus()
 			return m, fetchBrokers(m.client)
 		case "2":
-			// Switch to Topics tab
-			if m.activeTab == BrokersTab {
-				m.brokersTable.Blur()
-			}
+			m.blurActiveTab()
 			m.activeTab = TopicsTab
 			m.topicsTable.Focus()
-			m.configTable.Blur()
 			m.focusedPanel = 0
 			return m, fetchTopics(m.client)
 		case "3":
-			// Switch to Consumer Groups tab
-			switch m.activeTab {
-			case BrokersTab:
-				m.brokersTable.Blur()
-			case TopicsTab:
-				m.topicsTable.Blur()
-				m.configTable.Blur()
-			}
+			m.blurActiveTab()
 			m.activeTab = ConsumerGroupsTab
 			m.consumersTable.Focus()
 			return m, fetchConsumerGroups(m.client)
 		case "4":
-			// Switch to ACLs tab
-			switch m.activeTab {
-			case BrokersTab:
-				m.brokersTable.Blur()
-			case TopicsTab:
-				m.topicsTable.Blur()
-			}
+			m.blurActiveTab()
 			m.activeTab = ACLsTab
+			if m.aclTable != nil {
+				m.aclTable.Focus()
+			}
 			return m, fetchACLs(m.client)
 		case "r", "R":
 			m.loading = true
 			switch m.activeTab {
 			case ACLsTab:
+				m.loadingLabel = "Loading ACLs…"
 				return m, fetchACLs(m.client)
 			case ConsumerGroupsTab:
+				m.loadingLabel = "Measuring consumer group lag…"
 				return m, fetchConsumerGroups(m.client)
 			default:
+				m.loadingLabel = "Loading topics and brokers…"
 				return m, tea.Batch(fetchTopics(m.client), fetchBrokers(m.client))
 			}
 		case "C":
 			if m.activeTab == ACLsTab {
 				// Create ACL
-				m.createACLModel = NewCreateACLHuhModel(m.client)
+				m.createACLModel = NewCreateACLHuhModel(m.client, m.width, m.height)
 				m.mode = CreateACLView
 				return m, m.createACLModel.Init()
 			} else {
 				// Create Topic
-				m.createTopicModel = NewCreateTopicModel(m.client)
+				m.createTopicModel = NewCreateTopicModel(m.client, m.width, m.height)
 				m.mode = CreateTopicView
 				return m, m.createTopicModel.Init()
 			}
@@ -470,7 +553,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.mode = DeleteTopicView
 					return m, m.deleteTopicModel.Init()
 				}
-			} else if m.activeTab == ACLsTab && len(m.acls) > 0 && !m.loading && m.err == nil {
+			} else if m.activeTab == ACLsTab && m.aclTable != nil && len(m.acls) > 0 && !m.loading && m.err == nil {
 				// Delete ACL
 				selectedRow := m.aclTable.SelectedRow()
 				if len(selectedRow) >= 7 {
@@ -484,11 +567,12 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 						PermissionType: selectedRow[5], // Permission
 						Host:           selectedRow[6], // Host
 					}
-					m.deleteACLModel = NewDeleteACLModel(m.client, selectedACL)
+					m.deleteACLModel = NewDeleteACLModel(m.client, selectedACL, m.width, m.height)
 					m.mode = DeleteACLView
 					return m, m.deleteACLModel.Init()
 				}
 			}
+			return m, nil
 		case "p", "P":
 			if m.activeTab == TopicsTab && len(m.topics) > 0 && !m.loading && m.err == nil {
 				selectedRow := m.topicsTable.SelectedRow()
@@ -499,6 +583,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.producerModel.Init()
 				}
 			}
+			return m, nil
 		case "e", "E":
 			// Edit config value or ACL
 			if m.activeTab == TopicsTab && m.focusedPanel == 1 && m.topicConfig != nil {
@@ -529,12 +614,26 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 						PermissionType: selectedRow[5],
 						Host:           selectedRow[6],
 					}
-					m.editACLModel = NewEditACLHuhModel(m.client, selectedACL)
+					m.editACLModel = NewEditACLHuhModel(m.client, selectedACL, m.width, m.height)
 					m.mode = EditACLView
 					return m, m.editACLModel.Init()
 				}
 			}
+			return m, nil
 		case "enter":
+			if m.activeTab == ConsumerGroupsTab {
+				selectedRow := m.consumersTable.SelectedRow()
+				if len(selectedRow) > 0 {
+					m.groupLagModel = NewGroupLagModel(m.client, selectedRow[0], m.width, m.height)
+					m.mode = GroupLagView
+					return m, m.groupLagModel.Init()
+				}
+				return m, nil
+			}
+			if m.activeTab == BrokersTab {
+				m.brokerDetail = !m.brokerDetail
+				return m, nil
+			}
 			if m.activeTab == TopicsTab && len(m.topics) > 0 && !m.loading && m.err == nil {
 				selectedRow := m.topicsTable.SelectedRow()
 				if len(selectedRow) > 0 {
@@ -544,6 +643,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.consumerModel.Init()
 				}
 			}
+			return m, nil
 		}
 
 	case topicsMsg:
@@ -554,16 +654,14 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.topics = msg.topics
 		m.err = nil
+		m.rebuildTopicRows()
 
-		rows := make([]table.Row, len(m.topics))
-		for i, topic := range m.topics {
-			rows[i] = table.Row{
-				topic.Name,
-				fmt.Sprintf("%d", topic.Partitions),
-				fmt.Sprintf("%d", topic.ReplicationFactor),
-			}
+		// Message counts and disk usage are a separate, much more expensive
+		// round trip, so the list paints now and the numbers arrive later.
+		if !m.metricsInFlight {
+			m.metricsInFlight = true
+			cmds = append(cmds, fetchTopicMetrics(m.client))
 		}
-		m.topicsTable.SetRows(rows)
 
 		// If we have topics and we're on the topics tab, select the first one
 		if len(m.topics) > 0 && m.activeTab == TopicsTab {
@@ -575,9 +673,34 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(selectedRow) > 0 {
 				topicName := selectedRow[0]
 				m.selectedTopic = topicName
-				return m, fetchTopicConfig(m.client, topicName)
+				cmds = append(cmds, fetchTopicConfig(m.client, topicName))
+				return m, tea.Batch(cmds...)
 			}
 		}
+
+	case topicMetricsMsg:
+		m.metricsInFlight = false
+		// Metrics are a nicety: a cluster that denies DescribeLogDirs still
+		// shows a usable topic list, so a failure here is logged by the client
+		// and the columns simply stay empty.
+		if msg.err == nil {
+			m.topicMetrics = msg.metrics
+			m.rebuildTopicRows()
+		}
+
+	case toastExpiredMsg:
+		m.toast = m.toast.expire(msg)
+
+	case clipboardMsg:
+		var cmd tea.Cmd
+		m, cmd = m.handleClipboardMsg(msg)
+		return m, cmd
+
+	case autoRefreshTickMsg:
+		if !m.autoRefresh {
+			return m, nil
+		}
+		return m, tea.Batch(m.refreshActiveTab(), autoRefreshTick())
 
 	case topicConfigMsg:
 		m.loadingConfig = false
@@ -595,41 +718,8 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.brokers = msg.brokers
 		m.err = nil
+		m.rebuildBrokerRows()
 
-		rows := make([]table.Row, len(m.brokers))
-		for i, broker := range m.brokers {
-			role := "Broker"
-			if broker.IsController {
-				role = "✅ Controller"
-			}
-
-			rack := broker.Rack
-			if rack == "" {
-				rack = "-"
-			}
-
-			version := broker.ApiVersions
-			if version == "" {
-				version = "Unknown"
-			}
-
-			logDirs := "-"
-			if broker.LogDirCount > 0 {
-				logDirs = fmt.Sprintf("%d", broker.LogDirCount)
-			}
-
-			rows[i] = table.Row{
-				fmt.Sprintf("%d", broker.ID),
-				broker.Host,
-				fmt.Sprintf("%d", broker.Port),
-				broker.Status,
-				version,
-				role,
-				rack,
-				logDirs,
-			}
-		}
-		m.brokersTable.SetRows(rows)
 		// Also fetch cluster stats when brokers are loaded
 		return m, fetchClusterStats(m.client)
 
@@ -647,24 +737,7 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.consumerGroups = msg.groups
 		m.err = nil
-
-		rows := make([]table.Row, len(m.consumerGroups))
-		for i, group := range m.consumerGroups {
-			lag := fmt.Sprintf("%d", group.ConsumerLag)
-			if group.ConsumerLag == 0 {
-				lag = "0"
-			}
-
-			rows[i] = table.Row{
-				group.GroupID,
-				fmt.Sprintf("%d", group.NumMembers),
-				fmt.Sprintf("%d", group.NumTopics),
-				lag,
-				group.Coordinator,
-				group.State,
-			}
-		}
-		m.consumersTable.SetRows(rows)
+		m.rebuildConsumerRows()
 
 	case aclsMsg:
 		m.loading = false
@@ -675,17 +748,9 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.acls = msg.acls
 		m.err = nil
 
-		// Create ACL table if not already created
+		// The ACL table is built on first use: a cluster with no authorizer
+		// never opens this tab, and the columns are wide.
 		if m.aclTable == nil {
-			aclColumns := []table.Column{
-				{Title: "Principal", Width: 20},
-				{Title: "Resource Type", Width: 15},
-				{Title: "Resource", Width: 25},
-				{Title: "Pattern", Width: 10},
-				{Title: "Operation", Width: 15},
-				{Title: "Permission", Width: 10},
-				{Title: "Host", Width: 15},
-			}
 			t := table.New(
 				table.WithColumns(aclColumns),
 				table.WithFocused(true),
@@ -697,21 +762,10 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			as.Selected = tableSelectedStyle()
 			t.SetStyles(as)
 			m.aclTable = &t
+			m.aclTable.SetWidth(m.width - 4)
+			m.aclTable.SetHeight(max(m.height-10, 3))
 		}
-
-		rows := make([]table.Row, len(m.acls))
-		for i, acl := range m.acls {
-			rows[i] = table.Row{
-				acl.Principal,
-				acl.ResourceType,
-				acl.ResourceName,
-				acl.PatternType,
-				acl.Operation,
-				acl.PermissionType,
-				acl.Host,
-			}
-		}
-		m.aclTable.SetRows(rows)
+		m.rebuildACLRows()
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -730,6 +784,17 @@ func (m Model) updateListView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Consumers table gets full width
 		m.consumersTable.SetHeight(tableHeight)
 		m.consumersTable.SetWidth(msg.Width - 4)
+
+		// The ACL table is created lazily, so it misses the resize that built
+		// the others and has to be caught up here.
+		if m.aclTable != nil {
+			m.aclTable.SetHeight(tableHeight)
+			m.aclTable.SetWidth(msg.Width - 4)
+		}
+
+		// The topic name column is sized from the table width, so the rows are
+		// rebuilt rather than just resized.
+		m.rebuildTopicRows()
 	}
 
 	// Update the active table based on current tab
@@ -782,8 +847,7 @@ func (m Model) updateProducerView(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case SwitchToListViewMsg:
-		m.mode = ListView
-		return m, nil
+		return m.backToList(msg, nil, "")
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -799,8 +863,7 @@ func (m Model) updateConsumerView(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case SwitchToListViewMsg:
-		m.mode = ListView
-		return m, nil
+		return m.backToList(msg, nil, "")
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -816,9 +879,7 @@ func (m Model) updateCreateTopicView(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case SwitchToListViewMsg:
-		m.mode = ListView
-		m.loading = true
-		return m, fetchTopics(m.client)
+		return m.backToList(msg, fetchTopics(m.client), "Reloading topics…")
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -834,10 +895,17 @@ func (m Model) updateCreateACLView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ViewChangedMsg:
 		if msg.View == ACLsTab {
-			m.mode = ListView
 			m.activeTab = ACLsTab
-			m.loading = true
-			return m, fetchACLs(m.client)
+			// Only a dialog that changed something carries a notice. Cancelling
+			// out of one changed nothing on the cluster, so the list is already
+			// correct and does not need a refetch or a spinner over it — the
+			// same rule the delete-topic dialog follows.
+			if msg.Notice == "" {
+				return m.backToList(SwitchToListViewMsg{}, nil, "")
+			}
+			return m.backToList(
+				SwitchToListViewMsg{Notice: msg.Notice, Level: msg.Level},
+				fetchACLs(m.client), "Reloading ACLs…")
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -853,10 +921,17 @@ func (m Model) updateEditACLView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ViewChangedMsg:
 		if msg.View == ACLsTab {
-			m.mode = ListView
 			m.activeTab = ACLsTab
-			m.loading = true
-			return m, fetchACLs(m.client)
+			// Only a dialog that changed something carries a notice. Cancelling
+			// out of one changed nothing on the cluster, so the list is already
+			// correct and does not need a refetch or a spinner over it — the
+			// same rule the delete-topic dialog follows.
+			if msg.Notice == "" {
+				return m.backToList(SwitchToListViewMsg{}, nil, "")
+			}
+			return m.backToList(
+				SwitchToListViewMsg{Notice: msg.Notice, Level: msg.Level},
+				fetchACLs(m.client), "Reloading ACLs…")
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -871,10 +946,17 @@ func (m Model) updateDeleteACLView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ViewChangedMsg:
 		if msg.View == ACLsTab {
-			m.mode = ListView
 			m.activeTab = ACLsTab
-			m.loading = true
-			return m, fetchACLs(m.client)
+			// Only a dialog that changed something carries a notice. Cancelling
+			// out of one changed nothing on the cluster, so the list is already
+			// correct and does not need a refetch or a spinner over it — the
+			// same rule the delete-topic dialog follows.
+			if msg.Notice == "" {
+				return m.backToList(SwitchToListViewMsg{}, nil, "")
+			}
+			return m.backToList(
+				SwitchToListViewMsg{Notice: msg.Notice, Level: msg.Level},
+				fetchACLs(m.client), "Reloading ACLs…")
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -889,9 +971,8 @@ func (m Model) updateEditConfigView(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case SwitchToListViewMsg:
-		m.mode = ListView
-		// Refresh the topic config to show any changes
-		return m, fetchTopicConfig(m.client, m.selectedTopic)
+		// Reload the config so the table shows the value that was just written.
+		return m.backToList(msg, fetchTopicConfig(m.client, m.selectedTopic), "")
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -910,9 +991,7 @@ func (m Model) updateAIAssistantView(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case SwitchToListViewMsg:
-		m.mode = ListView
-		m.loading = true
-		return m, fetchTopics(m.client)
+		return m.backToList(msg, fetchTopics(m.client), "Reloading topics…")
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -931,9 +1010,13 @@ func (m Model) updateDeleteTopicView(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case SwitchToListViewMsg:
-		m.mode = ListView
-		m.loading = true
-		return m, fetchTopics(m.client)
+		// Only a delete that happened carries a notice. Cancelling the dialog
+		// changed nothing, so the list is already correct and does not need a
+		// spinner over it.
+		if msg.Notice == "" {
+			return m.backToList(msg, nil, "")
+		}
+		return m.backToList(msg, fetchTopics(m.client), "Reloading topics…")
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -947,14 +1030,37 @@ func (m Model) updateDeleteTopicView(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateSessionManagerView(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg.(type) {
+	switch msg := msg.(type) {
 	case SwitchToListViewMsg:
-		m.mode = ListView
-		return m, nil
+		return m.backToList(msg, nil, "")
 	}
 
 	updated, cmd := m.sessionManagerModel.Update(msg)
 	m.sessionManagerModel = updated
+	return m, cmd
+}
+
+func (m Model) updateGroupLagView(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case SwitchToListViewMsg:
+		return m.backToList(msg, fetchConsumerGroups(m.client), "")
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+
+	case clipboardMsg:
+		var cmd tea.Cmd
+		m, cmd = m.handleClipboardMsg(msg)
+		return m, cmd
+
+	case toastExpiredMsg:
+		m.toast = m.toast.expire(msg)
+		return m, nil
+	}
+
+	updated, cmd := m.groupLagModel.Update(msg)
+	m.groupLagModel = updated
 	return m, cmd
 }
 
@@ -980,9 +1086,100 @@ func (m Model) View() string {
 		return m.deleteTopicModel.View()
 	case SessionManagerView:
 		return m.sessionManagerModel.View()
+	case GroupLagView:
+		view := m.groupLagModel.View()
+		if m.toast.visible() {
+			view = lipgloss.JoinVertical(lipgloss.Left, view, m.toast.View(m.width))
+		}
+		return m.withOverlays(view)
 	default:
-		return m.listView()
+		return m.withOverlays(m.listView())
 	}
+}
+
+// withOverlays draws the help window over a view, if it is open.
+//
+// The help window replaces the screen rather than compositing onto it: Bubble
+// Tea renders a single string and slicing styled text apart to punch a hole in
+// it is how escape sequences get torn in half.
+func (m Model) withOverlays(view string) string {
+	if m.help.active {
+		return m.help.View(m.width, m.height)
+	}
+	if m.brokerDetail && m.activeTab == BrokersTab && m.mode == ListView {
+		if detail, ok := m.brokerDetailBox(); ok {
+			return renderOverlay(detail, m.width, m.height)
+		}
+	}
+	return view
+}
+
+// brokerDetailBox renders everything known about the selected broker.
+//
+// The table has to fit eight columns across the terminal, so it abbreviates;
+// this is where the full host, the listener and log-directory counts, and the
+// negotiated API version are readable.
+func (m Model) brokerDetailBox() (string, bool) {
+	row := m.brokersTable.SelectedRow()
+	if len(row) == 0 {
+		return "", false
+	}
+
+	var selected *kafka.BrokerInfo
+	for i := range m.brokers {
+		if fmt.Sprintf("%d", m.brokers[i].ID) == row[0] {
+			selected = &m.brokers[i]
+			break
+		}
+	}
+	if selected == nil {
+		return "", false
+	}
+
+	role := "Broker"
+	if selected.IsController {
+		role = "Broker + Controller"
+	}
+
+	status := successStyle.Render(selected.Status)
+	if selected.Status != "Online" {
+		status = errorStyle.Render(selected.Status)
+	}
+
+	fields := []struct{ label, value string }{
+		{"ID", fmt.Sprintf("%d", selected.ID)},
+		{"Address", fmt.Sprintf("%s:%d", selected.Host, selected.Port)},
+		{"Role", role},
+		{"Rack", orDash(selected.Rack)},
+		{"API version", orDash(selected.ApiVersions)},
+		{"Listeners", fmt.Sprintf("%d", selected.ListenerCount)},
+		{"Log directories", fmt.Sprintf("%d", selected.LogDirCount)},
+	}
+
+	var sb strings.Builder
+	sb.WriteString(sectionTitleStyle.Render("Broker " + row[0]))
+	sb.WriteString("\n\n")
+	sb.WriteString(labelStyle.Render(pad("Status", 16)))
+	sb.WriteString(status)
+	sb.WriteString("\n")
+	for _, f := range fields {
+		sb.WriteString(labelStyle.Render(pad(f.label, 16)))
+		sb.WriteString(valueStyle.Render(f.value))
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\n")
+	sb.WriteString(renderHelpBar("y", "copy row", "esc", "close"))
+
+	return overlayBoxStyle(min(max(m.width-10, 30), 60)).Render(sb.String()), true
+}
+
+// orDash renders an empty value as a dash, so a blank line never reads as a
+// missing field.
+func orDash(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return value
 }
 
 func (m Model) listView() string {
@@ -995,7 +1192,11 @@ func (m Model) listView() string {
 			Foreground(theme.SubText).
 			PaddingLeft(2).
 			PaddingTop(1)
-		content = loadingStyle.Render(m.spinner.View() + "  Connecting to Kafka cluster...")
+		label := m.loadingLabel
+		if label == "" {
+			label = "Loading…"
+		}
+		content = loadingStyle.Render(m.spinner.View() + "  " + label)
 	} else if m.err != nil {
 		errBox := lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
@@ -1021,6 +1222,13 @@ func (m Model) listView() string {
 	}
 
 	footer := m.renderStatusBar()
+	if m.toast.visible() {
+		footer = lipgloss.JoinVertical(lipgloss.Left, m.toast.View(m.width), footer)
+	}
+	if m.tabStates[m.activeTab].filtering {
+		footer = lipgloss.JoinVertical(lipgloss.Left,
+			m.tabStates[m.activeTab].filter.View(), footer)
+	}
 
 	// Stack: header + content + spacer + footer
 	// Calculate available height for content
@@ -1087,58 +1295,96 @@ func (m Model) renderTabBar() string {
 }
 
 func (m Model) renderStatusBar() string {
-	help := m.renderHelpItems()
+	// Right side: which tab is showing, plus anything narrowing it.
+	right := statusBarModeStyle.Render(m.tabLabel())
 
-	// Right side: mode indicator
-	modeLabel := ""
-	switch m.activeTab {
-	case BrokersTab:
-		modeLabel = "BROKERS"
-	case TopicsTab:
-		modeLabel = "TOPICS"
-	case ConsumerGroupsTab:
-		modeLabel = "GROUPS"
-	case ACLsTab:
-		modeLabel = "ACLS"
+	var indicators []string
+	if state := m.tabStates[m.activeTab]; state.active() {
+		indicators = append(indicators, fmt.Sprintf("filter %q  %d/%d",
+			state.filter.Value(), m.visibleRowCount(), m.totalRowCount()))
+	}
+	if m.autoRefresh {
+		indicators = append(indicators, "⟳ auto")
+	}
+	if len(indicators) > 0 {
+		right = lipgloss.JoinHorizontal(lipgloss.Top,
+			statusBarStyle.Render(strings.Join(indicators, "  ·  ")), right)
 	}
 
-	right := statusBarModeStyle.Render(modeLabel)
-	leftWidth := m.width - lipgloss.Width(right) - 2
-	left := statusBarStyle.Width(leftWidth).Render(help)
+	// The bar is one row, always: a left side long enough to wrap would push
+	// the whole layout a row past the bottom of the terminal, so the help items
+	// are fitted to the space that is left and MaxHeight makes a mistake there
+	// cost an item rather than the layout.
+	leftWidth := max(m.width-lipgloss.Width(right)-2, 0)
+	left := statusBarStyle.Width(leftWidth).MaxHeight(1).Render(m.renderHelpItems(leftWidth))
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 
-func (m Model) renderHelpItems() string {
-	base := []string{
+// tabLabel names the active tab for the status bar.
+func (m Model) tabLabel() string {
+	switch m.activeTab {
+	case BrokersTab:
+		return "BROKERS"
+	case TopicsTab:
+		return "TOPICS"
+	case ConsumerGroupsTab:
+		return "GROUPS"
+	case ACLsTab:
+		return "ACLS"
+	}
+	return ""
+}
+
+// renderHelpItems builds the footer hints for the active tab, most useful
+// first, and drops the ones that do not fit in width.
+//
+// "?" is always kept, and kept last: whatever else is cut, the way to find the
+// rest of the bindings stays on screen.
+func (m Model) renderHelpItems(width int) string {
+	items := []string{
 		"tab", "switch",
-		"r", "refresh",
-		"s", "sessions",
-		"a", "AI",
+		"/", "filter",
+		"enter", m.enterAction(),
 	}
 
-	var extra []string
 	switch m.activeTab {
 	case TopicsTab:
-		extra = []string{
-			"enter", "consume",
-			"p", "produce",
-			"C", "create",
-			"d", "delete",
-		}
 		if m.focusedPanel == 1 {
-			extra = append([]string{"e", "edit config"}, extra...)
+			items = append(items, "e", "edit config")
 		}
+		items = append(items, "p", "produce", "C", "create", "d", "delete")
 	case ACLsTab:
-		extra = []string{"C", "create"}
+		items = append(items, "C", "create")
 		if len(m.acls) > 0 {
-			extra = append(extra, "e", "edit", "d", "delete")
+			items = append(items, "e", "edit", "d", "delete")
 		}
 	}
 
-	all := append(base, extra...)
-	all = append(all, "q", "quit")
-	return renderHelpBar(all...)
+	items = append(items, "r", "refresh", "y", "copy", "s", "sessions", "a", "AI", "q", "quit")
+
+	// Trim two at a time (key and description) from just before the trailing
+	// "?" until the line fits.
+	for {
+		line := renderHelpBar(append(items, "?", "help")...)
+		if width <= 0 || lipgloss.Width(line) <= width || len(items) <= 2 {
+			return line
+		}
+		items = items[:len(items)-2]
+	}
+}
+
+// enterAction says what Enter does on the active tab, since it differs per tab.
+func (m Model) enterAction() string {
+	switch m.activeTab {
+	case ConsumerGroupsTab:
+		return "lag detail"
+	case BrokersTab:
+		return "broker detail"
+	case TopicsTab:
+		return "consume"
+	}
+	return "open"
 }
 
 func (m Model) renderBrokersView() string {
@@ -1441,4 +1687,3 @@ func (m Model) renderACLsView() string {
 
 	return panel.Render(m.aclTable.View())
 }
-

@@ -4,24 +4,24 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/digitalis-io/kconduit/pkg/kafka"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/digitalis-io/kconduit/pkg/kafka"
 )
 
 type ProducerModel struct {
-	topic       string
-	topicInfo   *kafka.TopicInfo
-	client      *kafka.Client
-	keyInput    textinput.Model
-	valueInput  textarea.Model
-	focusIndex  int
-	err         error
-	successMsg  string
-	width       int
-	height      int
-	msgCount    int
+	topic      string
+	topicInfo  *kafka.TopicInfo
+	client     *kafka.Client
+	keyInput   textinput.Model
+	valueInput textarea.Model
+	focusIndex int
+	err        error
+	successMsg string
+	width      int
+	height     int
+	msgCount   int
 }
 
 func NewProducerModel(topic string, client *kafka.Client) ProducerModel {
@@ -207,4 +207,21 @@ func ReturnToListView() tea.Msg {
 	return SwitchToListViewMsg{}
 }
 
-type SwitchToListViewMsg struct{}
+// returnWithNotice goes back to the list and asks it to toast a message.
+//
+// Sub-views are dismissed the moment they succeed, which used to take their
+// "topic created" line with them and leave no sign anything had happened. The
+// notice travels with the dismissal so the confirmation outlives the view that
+// produced it.
+func returnWithNotice(level toastLevel, notice string) tea.Cmd {
+	return func() tea.Msg {
+		return SwitchToListViewMsg{Notice: notice, Level: level}
+	}
+}
+
+// SwitchToListViewMsg dismisses a sub-view. A zero value is valid and means
+// "just go back"; Notice adds a toast on the list view underneath.
+type SwitchToListViewMsg struct {
+	Notice string
+	Level  toastLevel
+}
