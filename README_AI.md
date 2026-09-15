@@ -31,7 +31,7 @@ The AI assistant lets you interact with Kafka using natural language commands in
 You can specify the AI engine and model via command-line arguments:
 
 ```bash
-./kconduit -b localhost:9092 --ai-engine gemini --ai-model gemini-3.1-pro-preview
+./kconduit -b localhost:9092 --ai-engine gemini --ai-model gemini-flash-latest
 ./kconduit -b localhost:9092 --ai-engine openai --ai-model gpt-4
 ./kconduit -b localhost:9092 --ai-engine anthropic --ai-model claude-3-opus-20240229
 ./kconduit -b localhost:9092 --ai-engine ollama --ai-model llama2
@@ -53,7 +53,7 @@ export OPENAI_MODEL="gpt-3.5-turbo"  # Optional, defaults to gpt-3.5-turbo
 ### 2. Google Gemini
 ```bash
 export GEMINI_API_KEY="your-api-key-here"   # or GOOGLE_API_KEY
-export GEMINI_MODEL="gemini-3.1-pro-preview"  # Optional, defaults to gemini-3.1-pro-preview
+export GEMINI_MODEL="gemini-flash-latest"  # Optional, defaults to gemini-flash-latest
 ./kconduit -b localhost:9092
 # Or override with command-line
 ./kconduit -b localhost:9092 --ai-engine gemini --ai-model gemini-1.5-flash
@@ -148,7 +148,7 @@ Configuration options are applied in the following order (highest priority first
 | `OPENAI_MODEL` | OpenAI model to use | gpt-3.5-turbo |
 | `GEMINI_API_KEY` | Google Gemini API key | - |
 | `GOOGLE_API_KEY` | Accepted in place of `GEMINI_API_KEY`; `GEMINI_API_KEY` wins if both are set | - |
-| `GEMINI_MODEL` | Gemini model to use | gemini-3.1-pro-preview |
+| `GEMINI_MODEL` | Gemini model to use | gemini-flash-latest |
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude | - |
 | `ANTHROPIC_MODEL` | Claude model to use | claude-3-haiku-20240307 |
 | `OLLAMA_URL` | Ollama server URL | http://localhost:11434 |

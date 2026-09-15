@@ -77,7 +77,7 @@ func NewSessionFormModel(width, height int) *SessionFormModel {
 		saslProtocol: "SASL_PLAINTEXT",
 		logLevel:     "info",
 		aiEngine:     "gemini",
-		aiModel:      "gemini-3.1-pro-preview",
+		aiModel:      "gemini-flash-latest",
 	}
 	m.buildForm()
 	return m
@@ -227,7 +227,7 @@ func (m *SessionFormModel) buildForm() {
 				Value(&m.aiEngine),
 			huh.NewInput().
 				Title("AI Model").
-				Placeholder("gemini-3.1-pro-preview").
+				Placeholder("gemini-flash-latest").
 				Value(&m.aiModel),
 		).Title("Advanced"),
 	).

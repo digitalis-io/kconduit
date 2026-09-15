@@ -133,7 +133,7 @@ export OPENAI_API_KEY="your-api-key"
 
 # Using Google Gemini
 export GEMINI_API_KEY="your-api-key"   # or GOOGLE_API_KEY
-./kconduit -b localhost:9092 --ai-engine gemini --ai-model gemini-3.1-pro-preview
+./kconduit -b localhost:9092 --ai-engine gemini --ai-model gemini-flash-latest
 
 # Using Anthropic Claude
 export ANTHROPIC_API_KEY="your-api-key"
@@ -290,7 +290,7 @@ Press `A` from any screen to open the AI assistant. For full provider setup and 
 | `KCONDUIT_LOG_LEVEL` | Log level (debug, info, warn, error) | info |
 | `KCONDUIT_LOG_FILE` | Log file path | stderr |
 | `KCONDUIT_AI_ENGINE` | AI engine (openai, gemini, anthropic, ollama) | gemini |
-| `KCONDUIT_AI_MODEL` | AI model to use | gemini-3.1-pro-preview |
+| `KCONDUIT_AI_MODEL` | AI model to use | gemini-flash-latest |
 | `KCONDUIT_SASL_ENABLED` | Enable SASL authentication | false |
 | `KCONDUIT_SASL_MECHANISM` | SASL mechanism | PLAIN |
 | `KCONDUIT_SASL_USERNAME` | SASL username | - |
@@ -305,7 +305,7 @@ Press `A` from any screen to open the AI assistant. For full provider setup and 
 | `OPENAI_MODEL` | OpenAI model to use | gpt-3.5-turbo |
 | `GEMINI_API_KEY` | Google Gemini API key | - |
 | `GOOGLE_API_KEY` | Accepted in place of `GEMINI_API_KEY`; `GEMINI_API_KEY` wins if both are set | - |
-| `GEMINI_MODEL` | Gemini model to use | gemini-3.1-pro-preview |
+| `GEMINI_MODEL` | Gemini model to use | gemini-flash-latest |
 | `ANTHROPIC_API_KEY` | Anthropic API key | - |
 | `ANTHROPIC_MODEL` | Claude model to use | claude-3-haiku-20240307 |
 | `OLLAMA_URL` | Ollama server URL | http://localhost:11434 |
@@ -319,7 +319,7 @@ Press `A` from any screen to open the AI assistant. For full provider setup and 
 | `--log-level` | Log level (debug, info, warn, error) | info |
 | `--log-file` | Log file path (empty for stderr) | - |
 | `--ai-engine` | AI engine (openai, gemini, anthropic, ollama) | gemini |
-| `--ai-model` | AI model to use | gemini-3.1-pro-preview |
+| `--ai-model` | AI model to use | gemini-flash-latest |
 | `--session` | Load a saved connection session by name | - |
 | `--save-session` | Save current connection config as a named session and exit | - |
 | `--list-sessions` | List all saved connection sessions and exit | - |

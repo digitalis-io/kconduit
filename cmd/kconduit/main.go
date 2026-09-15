@@ -207,7 +207,7 @@ func main() {
 	rootCmd.Flags().StringVar(&cfgLogLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	rootCmd.Flags().StringVar(&cfgLogFile, "log-file", "", "Log file path (if empty, logs to stderr)")
 	rootCmd.Flags().StringVar(&cfgAiEngine, "ai-engine", "gemini", "AI engine to use (e.g., openai)")
-	rootCmd.Flags().StringVar(&cfgAiModel, "ai-model", "gemini-3.1-pro-preview", "AI model to use (e.g., gpt-3.5-turbo, gpt-4)")
+	rootCmd.Flags().StringVar(&cfgAiModel, "ai-model", "gemini-flash-latest", "AI model to use (e.g., gpt-3.5-turbo, gpt-4)")
 
 	// Session management flags
 	rootCmd.Flags().StringVar(&cfgSession, "session", "", "Load a saved connection session by name")

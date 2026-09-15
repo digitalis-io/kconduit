@@ -27,6 +27,10 @@ const (
 	Ollama
 )
 
+// aiRequestTimeout bounds a single AI provider call. Reasoning models
+// (e.g. Gemini 3.x Pro) routinely take 30s+ with the full system prompt.
+const aiRequestTimeout = 120 * time.Second
+
 const aiSystemPrompt = `You are a Kafka assistant. Convert natural language commands into specific Kafka operations.
 
 For creating topics, respond with JSON:
@@ -140,7 +144,7 @@ func NewAIAssistantModel(client *kafka.Client, aiEngine string, aiModel string) 
 		OpenAIKey:      getEnv("OPENAI_API_KEY", ""),
 		OpenAIModel:    getEnv("OPENAI_MODEL", "gpt-3.5-turbo"),
 		GeminiKey:      getFirstEnv("", "GEMINI_API_KEY", "GOOGLE_API_KEY"),
-		GeminiModel:    getEnv("GEMINI_MODEL", "gemini-3.1-pro-preview"),
+		GeminiModel:    getEnv("GEMINI_MODEL", "gemini-flash-latest"),
 		AnthropicKey:   getEnv("ANTHROPIC_API_KEY", ""),
 		AnthropicModel: getEnv("ANTHROPIC_MODEL", "claude-3-haiku-20240307"),
 		OllamaURL:      getEnv("OLLAMA_URL", "http://localhost:11434"),
@@ -582,7 +586,7 @@ func (m *AIAssistantModel) queryOpenAI(query string) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+m.config.OpenAIKey)
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: aiRequestTimeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -648,8 +652,9 @@ func (m *AIAssistantModel) queryGemini(query string) (string, error) {
 			},
 		},
 		"generationConfig": map[string]interface{}{
-			"temperature":     0.3,
-			"maxOutputTokens": 2048,
+			"temperature": 0.3,
+			// Thinking tokens count against this limit on Gemini 2.5+/3.x.
+			"maxOutputTokens": 8192,
 		},
 	}
 
@@ -666,7 +671,7 @@ func (m *AIAssistantModel) queryGemini(query string) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-goog-api-key", m.config.GeminiKey)
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: aiRequestTimeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -753,7 +758,7 @@ func (m *AIAssistantModel) queryAnthropic(query string) (string, error) {
 	req.Header.Set("x-api-key", m.config.AnthropicKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: aiRequestTimeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -816,7 +821,7 @@ func (m *AIAssistantModel) queryOllama(query string) (string, error) {
 
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{Timeout: aiRequestTimeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to Ollama. Make sure it's running: %w", err)
